@@ -55,6 +55,9 @@ export const publicProcedure = t.procedure.use(async ({ ctx, next, path }) => {
     if (domainError) {
       const ErrorClass = domainError.constructor as new (...args: never[]) => DomainError;
       const code = DOMAIN_ERROR_CODE_MAP.get(ErrorClass) ?? "INTERNAL_SERVER_ERROR";
+      // Attach `data` directly: errorFormatter (which builds the shape
+      // fetchRequestHandler serializes) only runs over the HTTP link, not
+      // for direct createCaller() calls — callers need `data.i18nKey` either way.
       const mappedError = new TRPCError({ code, message: domainError.message, cause: domainError });
       Object.assign(mappedError, {
         data: { i18nKey: domainError.i18nKey, params: domainError.params },

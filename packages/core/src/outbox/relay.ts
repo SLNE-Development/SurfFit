@@ -10,12 +10,16 @@ export type StartOutboxRelayOptions = {
   channel: ConfirmChannel;
   intervalMs?: number;
   batchSize?: number;
+  maxAttempts?: number;
 };
+
+const DEFAULT_MAX_ATTEMPTS = 5;
 
 export function startOutboxRelay(opts: StartOutboxRelayOptions): { stop: () => Promise<void> } {
   const logger = createLogger("outbox-relay");
   const intervalMs = opts.intervalMs ?? 1000;
   const batchSize = opts.batchSize ?? 50;
+  const maxAttempts = opts.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
 
   let stopped = false;
   let inFlight: Promise<void> = Promise.resolve();
@@ -29,8 +33,9 @@ export function startOutboxRelay(opts: StartOutboxRelayOptions): { stop: () => P
         schema_version: number;
         payload: unknown;
         occurred_at: string;
+        attempts: number;
       }>(sql`
-        select id, event_type, schema_version, payload, occurred_at
+        select id, event_type, schema_version, payload, occurred_at, attempts
         from outbox_events
         where dispatched_at is null
         order by occurred_at
@@ -53,10 +58,24 @@ export function startOutboxRelay(opts: StartOutboxRelayOptions): { stop: () => P
             .set({ dispatchedAt: new Date(), attempts: sql`${schema.outboxEvents.attempts} + 1` })
             .where(sql`${schema.outboxEvents.id} = ${row.id}`);
         } catch (error) {
-          logger.warn({ err: error, eventId: row.id }, "failed to publish outbox event");
+          const attemptsAfterFailure = row.attempts + 1;
+          const exhausted = attemptsAfterFailure >= maxAttempts;
+
+          logger.warn(
+            { err: error, eventId: row.id, attempts: attemptsAfterFailure, exhausted },
+            exhausted
+              ? "outbox event exceeded max publish attempts, giving up"
+              : "failed to publish outbox event",
+          );
+
           await tx
             .update(schema.outboxEvents)
-            .set({ attempts: sql`${schema.outboxEvents.attempts} + 1` })
+            .set({
+              attempts: sql`${schema.outboxEvents.attempts} + 1`,
+              // Giving up after maxAttempts stops it from being re-selected
+              // forever; dispatchedAt marks it "done" (failed), not "sent".
+              dispatchedAt: exhausted ? new Date() : undefined,
+            })
             .where(sql`${schema.outboxEvents.id} = ${row.id}`);
         }
       }

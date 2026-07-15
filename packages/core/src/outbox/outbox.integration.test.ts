@@ -129,6 +129,48 @@ describe("transactional outbox", () => {
     expect(dispatchedForTest.every((r) => r.dispatchedAt !== null)).toBe(true);
     expect(dispatchedForTest).toHaveLength(100);
   }, 20_000);
+
+  it("gives up on a poison event after maxAttempts instead of retrying forever", async () => {
+    const envelope = await makeEnvelope("poison-user");
+
+    await db.transaction(async (tx) => {
+      await writeOutbox(tx, envelope);
+    });
+
+    // A closed channel makes every publish attempt fail deterministically.
+    const deadConnection = await amqplib.connect(rabbitContainer.getAmqpUrl());
+    const deadChannel = await deadConnection.createConfirmChannel();
+    await deadChannel.close();
+    await deadConnection.close();
+
+    const relay = startOutboxRelay({
+      db,
+      channel: deadChannel,
+      intervalMs: 50,
+      batchSize: 10,
+      maxAttempts: 3,
+    });
+
+    try {
+      await vi_waitUntil(async () => {
+        const [row] = await db
+          .select()
+          .from(schema.outboxEvents)
+          .where(eq(schema.outboxEvents.id, envelope.id));
+        return row !== undefined && row.attempts >= 3;
+      }, 10_000);
+    } finally {
+      await relay.stop();
+    }
+
+    const [row] = await db
+      .select()
+      .from(schema.outboxEvents)
+      .where(eq(schema.outboxEvents.id, envelope.id));
+
+    expect(row?.attempts).toBeGreaterThanOrEqual(3);
+    expect(row?.dispatchedAt).not.toBeNull();
+  }, 15_000);
 });
 
 async function vi_waitUntil(check: () => Promise<boolean>, timeoutMs = 5000): Promise<void> {
