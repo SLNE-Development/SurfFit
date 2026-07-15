@@ -21,7 +21,7 @@ SurfFit is an open-source fitness platform: strength training, workout tracking,
 | Operation | An official hosted instance operated by the maintainer + self-hosting for anyone. GDPR, data export, and moderation are launch requirements, not future work |
 | Auth | OAuth only (Discord first), no passwords. Username claimed on first login |
 | Messaging | RabbitMQ is the broker for all cross-process messaging (domain events, worker queues, realtime fan-out); Redis is scoped to caching and rate limiting (revised 2026-07-15, was BullMQ/Redis) |
-| Social graph | Asymmetric follows only — no friendship system; follow requests gate non-public profiles; blocking via user_blocks (revised 2026-07-15, was friendships + prepared follows) |
+| Social graph | Asymmetric follows only — no friendship system. Restricted visibility means "people the owner follows" ('following'), so no follow-request/approval flow exists; blocking via user_blocks (revised 2026-07-15, was friendships + prepared follows) |
 | UI components | shadcn/ui base components are always added via the shadcn CLI (`pnpm dlx shadcn@latest add <component>`), never written by hand or guessed |
 | Package manager | pnpm exclusively, enforced by tooling (`packageManager` field, preinstall guard, CI lockfile check) |
 | Agent onboarding | A root `CLAUDE.md` tells AI coding agents how to work in this repository; kept in sync with conventions |
@@ -176,7 +176,7 @@ Common column shorthand below: `id` = uuid pk v7, `ts` = created_at/updated_at, 
 - **accounts** — Auth.js OAuth accounts: id, user_id fk, provider, provider_account_id (unique per provider), token fields, ts
 - **sessions** — Auth.js: id, user_id fk, session_token unique, expires
 - **user_preferences** — user_id pk/fk, unit_system ('metric'|'imperial'), theme, first_weekday, default_gym_id, default_rest_seconds, ts
-- **privacy_settings** — user_id pk/fk, profile_visibility ('public'|'followers'|'private'), show_statistics bool, show_achievements bool, show_workouts bool, show_body_metrics bool (default false), ts. Non-public profiles are follow-request-gated (§4.8)
+- **privacy_settings** — user_id pk/fk, profile_visibility ('public'|'following'|'private'), show_statistics bool, show_achievements bool, show_workouts bool, show_body_metrics bool (default false), ts. 'following' = visible only to people the profile owner follows (§4.8)
 - **user_roles** — user_id fk, role ('user'|'moderator'|'admin'|'super_admin'), granted_by fk, granted_at; pk (user_id, role)
 - **user_consents** — id, user_id fk, consent_type, policy_version, granted_at, revoked_at
 
@@ -209,7 +209,7 @@ Exercises available at a gym are derived: exercises whose equipment_id appears i
 
 GitHub-style: a plan is the mutable container; versions are immutable snapshots; forks reference the exact version they came from.
 
-- **plans** — id, owner_user_id fk, name, description, visibility ('public'|'followers'|'private'), current_version_id fk null, forked_from_plan_id fk null, forked_from_version_id fk null, fork_count int default 0, ts, soft
+- **plans** — id, owner_user_id fk, name, description, visibility ('public'|'following'|'private'), current_version_id fk null, forked_from_plan_id fk null, forked_from_version_id fk null, fork_count int default 0, ts, soft
 - **plan_versions** — id, plan_id fk, version_number int, changelog, created_at (immutable after creation); unique (plan_id, version_number)
 - **plan_days** — id, plan_version_id fk, position, name ("Push Day"), description
 - **plan_day_exercises** — id, plan_day_id fk, exercise_id fk, position, superset_group smallint null (same value = same superset), notes
@@ -234,7 +234,7 @@ One narrow time-series table: new metric types and health-platform imports requi
 
 ### 4.8 Social
 
-- **follows** — follower_id fk, followee_id fk, status ('accepted'|'pending'), requested_at, accepted_at null; pk (follower_id, followee_id). The only social graph — there is no friendship system. Following a public profile is auto-accepted; following a non-public profile creates a 'pending' follow request the followee approves or declines (decline = row deleted)
+- **follows** — follower_id fk, followee_id fk, created_at; pk (follower_id, followee_id). The only social graph — there is no friendship system and no approval flow: following takes effect immediately. Restricted content uses the **'following' visibility direction**: content of user A marked 'following' is visible to viewer V iff A follows V. The owner therefore controls their audience directly through whom they follow — following someone grants *them* access to *your* restricted content, never the reverse. Mutual follows effectively recreate "friends": each sees the other's restricted content and feed activities
 - **user_blocks** — blocker_id fk, blocked_id fk, created_at; pk (blocker_id, blocked_id). Blocking deletes follow edges in both directions, prevents new ones, and hides all content and interactions between the two users (replaces the 'blocked' status the removed friendships table carried)
 - **activities** — id, actor_user_id fk, verb ('workout.completed'|'pr.achieved'|'plan.published'|'plan.forked'|'achievement.unlocked'), object_type, object_id, visibility (copied from actor's settings at write time), metadata jsonb (denormalized display payload), created_at, soft
 - **reactions** — id, user_id fk, subject_type ('activity'|'comment'), subject_id, kind ('like'), ts; unique (user_id, subject_type, subject_id, kind)
@@ -245,7 +245,7 @@ Feed = fan-out-on-read (query followed users' activities, Redis-cached) at launc
 
 ### 4.9 Notifications
 
-- **notifications** — id, recipient_user_id fk, type text (extensible set validated by Zod, not a DB enum: 'follow.new', 'follow.request', 'follow.accepted', 'reaction', 'comment', 'mention', 'achievement', 'system'), payload jsonb (typed per notification type via Zod), read_at null, created_at
+- **notifications** — id, recipient_user_id fk, type text (extensible set validated by Zod, not a DB enum: 'follow.new', 'reaction', 'comment', 'mention', 'achievement', 'system'), payload jsonb (typed per notification type via Zod), read_at null, created_at
 - **notification_preferences** — user_id fk, type, channel ('in_app'|'email'|'push'), enabled bool; pk (user_id, type, channel); push rows prepared, delivery deferred
 
 ### 4.10 Gamification
@@ -309,7 +309,7 @@ No GitHub PR statistics anywhere, per product requirements.
 | 27 | RabbitMQ over Redis-backed queues (revises the original BullMQ choice) | Real broker semantics: durable topic exchanges give the queue-selectable consumer-group model natively (bind patterns instead of code-level routing); publisher confirms + acks + DLX retry chains are first-class; management UI aids self-hosters; scales to genuinely separate services later. Redis stays for what it's best at: caching and rate limiting |
 | 28 | shadcn components only via the shadcn CLI | Generated components match the installed shadcn/Tailwind/Radix versions exactly; hand-written or from-memory components drift from upstream, break theming, and are unreviewable against a known baseline |
 | 29 | Root `CLAUDE.md` for AI coding agents | AI agents are expected contributors. One canonical, in-repo statement of commands, layering/import rules, and conventions (§3.3) keeps agent contributions consistent with the architecture; updated in the same PR as any convention change |
-| 30 | Asymmetric follows only — no friendship system (revises the original friends + prepared-follows design) | One social graph instead of two; 'followers' visibility replaces 'friends' everywhere. Follow requests gate non-public profiles so followers-only content keeps real privacy semantics; a dedicated user_blocks table preserves blocking, which the friendships table previously carried |
+| 30 | Asymmetric follows only, with 'following'-directed visibility — no friendship system (revises the original friends + prepared-follows design) | One social graph instead of two; 'following' visibility ("only people I follow") replaces 'friends' everywhere. Because the owner's own follow edges define the audience, no follow-request/approval flow is needed at all — following is instant, and mutual follows recreate "friends" organically. A dedicated user_blocks table preserves blocking, which the friendships table previously carried |
 
 ---
 
@@ -358,7 +358,7 @@ Each phase ends deployable and gets its own spec → plan → implementation cyc
 | 3. Fitness content | Exercises, gyms | Movements/exercises/muscles/equipment schema + EN/DE seed data; gyms + equipment; community submissions with **minimal moderation** (reports, approval queue); Postgres FTS |
 | 4. Training system | Plans + live workouts | Plan builder, immutable versions, forking; live workout mode (offline session, timers, previous-performance display); progression suggestions v1; personal records |
 | 5. Analytics | Insights | user_stats materialization; Recharts dashboards: strength/volume progression, frequency, muscle-group volume, PRs, calendar heatmap, streaks; body tracking UI |
-| 6. Social | Community | Follows (with follow requests gating non-public profiles), blocks, activity feed, reactions, comments, mentions, notification center + email digests, SSE realtime |
+| 6. Social | Community | Follows (instant, no approval flow), blocks, activity feed, reactions, comments, mentions, notification center + email digests, SSE realtime |
 | 7. Gamification | Motivation | Achievement definitions + worker evaluation, XP ledger + levels, badges |
 | 8. Admin | Operations | Moderation dashboard, user/content management, audit views, dead-letter visibility, feature-flag UI |
 | 9. Integrations | Ecosystem | HealthProvider adapters (Apple Health first), Meilisearch upgrade if search quality demands, public API groundwork |
