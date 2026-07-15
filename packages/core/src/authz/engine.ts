@@ -38,3 +38,9 @@ export function assertCan<TResource, TContext>(
     throw new PermissionDeniedError("authz.denied", { policy: policy.name });
   }
 }
+
+const ELEVATED_ROLES: Role[] = ["moderator", "admin", "super_admin"];
+
+export function hasElevatedRole(actor: Actor | null): boolean {
+  return actor?.roles.some((role) => ELEVATED_ROLES.includes(role)) ?? false;
+}

@@ -19,3 +19,5 @@ export * from "./identity";
 export * from "./storage";
 export * from "./authz";
 export * from "./gdpr";
+export * from "./locale";
+export * from "./exercises";

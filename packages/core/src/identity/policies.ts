@@ -1,6 +1,4 @@
-import { type Policy, definePolicy } from "../authz/engine";
-
-const ELEVATED_ROLES = ["moderator", "admin", "super_admin"] as const;
+import { type Policy, definePolicy, hasElevatedRole } from "../authz/engine";
 
 export const viewProfilePolicy: Policy<
   { ownerId: string; visibility: "public" | "following" | "private" },
@@ -9,9 +7,7 @@ export const viewProfilePolicy: Policy<
   if (actor?.id === resource.ownerId) {
     return true;
   }
-  if (
-    actor?.roles.some((role) => ELEVATED_ROLES.includes(role as (typeof ELEVATED_ROLES)[number]))
-  ) {
+  if (hasElevatedRole(actor)) {
     return true;
   }
   switch (resource.visibility) {
