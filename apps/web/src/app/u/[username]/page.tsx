@@ -54,7 +54,10 @@ export default async function PublicProfilePage({
           {profile.biography ? <p>{profile.biography}</p> : null}
           <p className="text-muted-foreground text-sm">Joined {joined}</p>
           {profile.isOwner ? (
-            <Button render={<Link href={route(routes.settings.profile, {})} />}>
+            <Button
+              nativeButton={false}
+              render={<Link href={route(routes.settings.profile, {})} />}
+            >
               Edit profile
             </Button>
           ) : null}

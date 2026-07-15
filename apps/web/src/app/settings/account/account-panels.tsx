@@ -83,7 +83,9 @@ function DataExportCard() {
         {status.data?.status === "ready" && status.data.downloadUrl ? (
           <div className="flex items-center gap-3">
             {/* biome-ignore lint/a11y/useAnchorContent: content comes from Button's children via the render prop */}
-            <Button render={<a href={status.data.downloadUrl} />}>Download</Button>
+            <Button nativeButton={false} render={<a href={status.data.downloadUrl} />}>
+              Download
+            </Button>
             {status.data.expiresAt ? (
               <span className="text-muted-foreground text-sm">
                 expires {new Date(status.data.expiresAt).toLocaleDateString()}

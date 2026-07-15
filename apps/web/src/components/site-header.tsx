@@ -20,7 +20,9 @@ export async function SiteHeader() {
           avatarUrl={await getAvatarUrl(await getStorage(), session.user.avatarKey)}
         />
       ) : (
-        <Button render={<Link href={route(routes.signin, {})} />}>Sign in</Button>
+        <Button nativeButton={false} render={<Link href={route(routes.signin, {})} />}>
+          Sign in
+        </Button>
       )}
     </header>
   );
