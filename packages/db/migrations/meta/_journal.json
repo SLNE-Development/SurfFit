@@ -36,6 +36,13 @@
       "when": 1784110383315,
       "tag": "0004_steady_vision",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784110506235,
+      "tag": "0005_slim_earthquake",
+      "breakpoints": true
     }
   ]
 }

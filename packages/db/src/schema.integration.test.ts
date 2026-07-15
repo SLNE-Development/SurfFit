@@ -14,10 +14,12 @@ import {
   exercises,
   gymMembers,
   gyms,
+  moderationActions,
   movementTranslations,
   movements,
   muscleGroups,
   outboxEvents,
+  reports,
   userPreferences,
   users,
 } from "./schema";
@@ -379,5 +381,77 @@ describe("gyms schema", () => {
     await expect(
       db.insert(userPreferences).values({ userId, defaultGymId: newId() }),
     ).rejects.toThrow();
+  });
+});
+
+describe("moderation schema", () => {
+  it("creates the reports and moderation_actions tables", async () => {
+    const result = await db.execute<{ table_name: string }>(
+      `select table_name from information_schema.tables where table_schema = 'public'`,
+    );
+    const tableNames = result.rows.map((row) => row.table_name);
+
+    expect(tableNames).toEqual(expect.arrayContaining(["reports", "moderation_actions"]));
+  });
+
+  it("inserts a report defaulting to open status and rejects a bogus reason", async () => {
+    const reporterId = newId();
+    await db
+      .insert(users)
+      .values({ id: reporterId, displayName: "Reporter", email: `${reporterId}@example.com` });
+
+    const reportId = newId();
+    await db.insert(reports).values({
+      id: reportId,
+      reporterUserId: reporterId,
+      subjectType: "movement",
+      subjectId: newId(),
+      reason: "spam",
+    });
+
+    const [row] = await db.select().from(reports).where(eq(reports.id, reportId));
+    expect(row?.status).toBe("open");
+
+    await expect(
+      db.execute(
+        `insert into reports (id, reporter_user_id, subject_type, subject_id, reason) values ('${newId()}', '${reporterId}', 'movement', '${newId()}', 'bogus')`,
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("inserts a moderation action referencing a report", async () => {
+    const moderatorId = newId();
+    await db
+      .insert(users)
+      .values({ id: moderatorId, displayName: "Mod", email: `${moderatorId}@example.com` });
+    const reporterId = newId();
+    await db
+      .insert(users)
+      .values({ id: reporterId, displayName: "Reporter2", email: `${reporterId}@example.com` });
+
+    const reportId = newId();
+    await db.insert(reports).values({
+      id: reportId,
+      reporterUserId: reporterId,
+      subjectType: "gym",
+      subjectId: newId(),
+      reason: "inappropriate",
+    });
+
+    const actionId = newId();
+    await db.insert(moderationActions).values({
+      id: actionId,
+      moderatorUserId: moderatorId,
+      action: "reject",
+      subjectType: "gym",
+      subjectId: newId(),
+      reportId,
+    });
+
+    const [row] = await db
+      .select()
+      .from(moderationActions)
+      .where(eq(moderationActions.id, actionId));
+    expect(row?.reportId).toBe(reportId);
   });
 });

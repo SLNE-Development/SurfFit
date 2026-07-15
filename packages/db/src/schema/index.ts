@@ -7,3 +7,4 @@ export * from "./outbox";
 export * from "./gdpr";
 export * from "./exercises";
 export * from "./gyms";
+export * from "./moderation";
