@@ -15,6 +15,13 @@
       "when": 1784082701387,
       "tag": "0001_windy_wong",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784088473602,
+      "tag": "0002_secret_victor_mancha",
+      "breakpoints": true
     }
   ]
 }

@@ -4,3 +4,4 @@ export * from "./preferences";
 export * from "./roles";
 export * from "./consents";
 export * from "./outbox";
+export * from "./gdpr";

@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "./client";
 import { newId } from "./ids";
 import { runMigrations } from "./migrate";
-import { outboxEvents, users } from "./schema";
+import { accountDeletionRequests, dataExportRequests, outboxEvents, users } from "./schema";
 
 let container: StartedPostgreSqlContainer;
 let db: ReturnType<typeof createDb>;
@@ -38,6 +38,8 @@ describe("identity schema", () => {
         "user_roles",
         "user_consents",
         "outbox_events",
+        "data_export_requests",
+        "account_deletion_requests",
       ]),
     );
   });
@@ -90,5 +92,74 @@ describe("identity schema", () => {
     const [row] = await db.select().from(outboxEvents).where(eq(outboxEvents.id, id));
 
     expect(row?.attempts).toBe(0);
+  });
+});
+
+describe("gdpr schema", () => {
+  it("inserts a data export request defaulting to pending status", async () => {
+    const userId = newId();
+    await db.insert(users).values({
+      id: userId,
+      displayName: "GDPR User",
+      email: `${userId}@example.com`,
+    });
+
+    const requestId = newId();
+    await db.insert(dataExportRequests).values({
+      id: requestId,
+      userId,
+    });
+
+    const [row] = await db
+      .select()
+      .from(dataExportRequests)
+      .where(eq(dataExportRequests.id, requestId));
+
+    expect(row?.status).toBe("pending");
+  });
+
+  it("rejects an invalid export status value", async () => {
+    const userId = newId();
+    await db.insert(users).values({
+      id: userId,
+      displayName: "GDPR User 2",
+      email: `${userId}@example.com`,
+    });
+
+    await expect(
+      db.execute(
+        `insert into data_export_requests (id, user_id, status) values ('${newId()}', '${userId}', 'bogus')`,
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("inserts a deletion request and rejects an invalid deletion status value", async () => {
+    const userId = newId();
+    await db.insert(users).values({
+      id: userId,
+      displayName: "GDPR User 3",
+      email: `${userId}@example.com`,
+    });
+
+    const requestId = newId();
+    const scheduledFor = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await db.insert(accountDeletionRequests).values({
+      id: requestId,
+      userId,
+      scheduledFor,
+    });
+
+    const [row] = await db
+      .select()
+      .from(accountDeletionRequests)
+      .where(eq(accountDeletionRequests.id, requestId));
+
+    expect(row?.status).toBe("pending");
+
+    await expect(
+      db.execute(
+        `insert into account_deletion_requests (id, user_id, scheduled_for, status) values ('${newId()}', '${userId}', now(), 'bogus')`,
+      ),
+    ).rejects.toThrow();
   });
 });
