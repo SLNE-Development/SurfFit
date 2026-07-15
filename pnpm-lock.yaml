@@ -285,6 +285,9 @@ importers:
       '@surffit/db':
         specifier: workspace:*
         version: link:../db
+      '@surffit/validation':
+        specifier: workspace:*
+        version: link:../validation
       '@trpc/server':
         specifier: ^11.0.0
         version: 11.18.0(typescript@5.9.3)
