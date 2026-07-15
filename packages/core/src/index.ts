@@ -13,3 +13,4 @@ export * from "./outbox/write";
 export * from "./outbox/relay";
 export * from "./identity";
 export * from "./storage";
+export * from "./authz";
