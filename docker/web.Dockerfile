@@ -14,6 +14,17 @@ WORKDIR /app
 COPY --from=pruner /app/out/json/ .
 RUN pnpm install --frozen-lockfile
 COPY --from=pruner /app/out/full/ .
+
+# Build-time-only placeholders so env validation passes during `next build`.
+# Real values are supplied at container runtime.
+ENV DATABASE_URL="postgres://build:build@localhost:5432/build" \
+  RABBITMQ_URL="amqp://build:build@localhost:5672" \
+  REDIS_URL="redis://localhost:6379" \
+  AUTH_SECRET="build-time-placeholder" \
+  AUTH_URL="http://localhost:3000" \
+  AUTH_DISCORD_ID="build-time-placeholder" \
+  AUTH_DISCORD_SECRET="build-time-placeholder"
+
 RUN pnpm turbo run build --filter=web
 
 FROM base AS runner
