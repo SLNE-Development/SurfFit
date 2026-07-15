@@ -5,6 +5,8 @@ export * from "./events/envelope";
 export * from "./events/user-registered";
 export * from "./events/gdpr";
 export * from "./events/user-deleted";
+export * from "./events/content";
+export * from "./events/report";
 export * from "./events/registry";
 export * from "./messaging/connection";
 export * from "./messaging/topology";

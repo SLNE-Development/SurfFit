@@ -24,7 +24,7 @@ export type ConsumerGroup = {
 
 export const consumerGroups: Record<string, ConsumerGroup> = {
   system: {
-    bindings: ["user.*"],
+    bindings: ["user.*", "content.*", "report.*"],
     async handler(envelope, ctx) {
       ctx.logger.info({ type: envelope.type, id: envelope.id }, "event received");
     },
