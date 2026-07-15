@@ -3,6 +3,7 @@ import type { Channel, ChannelModel, ConfirmChannel } from "amqplib";
 import amqplib from "amqplib";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { userRegisteredEvent } from "../events/user-registered";
+import { consumerGroups } from "./groups";
 import { publishEvent } from "./publisher";
 import { assertTopology } from "./topology";
 
@@ -70,8 +71,10 @@ describe("rabbitmq topology and messaging", () => {
     const queueName = "surffit.system";
     const deadQueueName = `${queueName}.dead`;
 
-    for (const suffix of ["10s", "1m", "10m"]) {
-      await channel.deleteQueue(`${queueName}.retry.${suffix}`).catch(() => {});
+    for (const groupName of Object.keys(consumerGroups)) {
+      for (const suffix of ["10s", "1m", "10m"]) {
+        await channel.deleteQueue(`surffit.${groupName}.retry.${suffix}`).catch(() => {});
+      }
     }
 
     const retryTtlMs = { "10s": 200, "1m": 200, "10m": 200 };

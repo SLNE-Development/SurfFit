@@ -1,13 +1,14 @@
 import type { ChannelModel, ConsumeMessage } from "amqplib";
 import { eventRegistry } from "../events/registry";
 import { createLogger } from "../logger";
-import { consumerGroups } from "./groups";
+import { type ConsumerServices, consumerGroups } from "./groups";
 
 const MAX_RETRIES = 3;
 const RETRY_SUFFIXES = ["10s", "1m", "10m"] as const;
 
 export type StartConsumersOptions = {
   maxRetries?: number;
+  services?: ConsumerServices;
 };
 
 export async function startConsumers(
@@ -52,7 +53,7 @@ export async function startConsumers(
       }
 
       try {
-        await group.handler(envelope, { logger });
+        await group.handler(envelope, { logger, ...opts.services });
         channel.ack(msg);
       } catch (error) {
         logger.warn({ err: error, type: envelope.type, retryCount }, "handler failed");

@@ -3,11 +3,13 @@ import {
   connect,
   consumerGroups,
   createLogger,
+  createStorageFromEnv,
   loadEnv,
   startConsumers,
   startOutboxRelay,
 } from "@surffit/core";
 import { createDb } from "@surffit/db";
+import { startCron } from "./cron";
 import { startHealthServer } from "./health";
 import { parseWorkerQueues } from "./queues";
 
@@ -20,9 +22,13 @@ async function main() {
   const channel = await connection.createConfirmChannel();
   await assertTopology(channel);
 
+  const storage = createStorageFromEnv(env);
+  await storage.ensureBucket();
+
   const groups = parseWorkerQueues(env.WORKER_QUEUES, Object.keys(consumerGroups));
-  const consumers = await startConsumers(connection, groups);
+  const consumers = await startConsumers(connection, groups, { services: { db, storage } });
   const relay = startOutboxRelay({ db, channel });
+  const cron = startCron({ channel });
 
   const port = env.PORT ? Number(env.PORT) : 3001;
   const healthServer = startHealthServer({ db, connection, port });
@@ -41,6 +47,7 @@ async function main() {
     }, 10_000);
 
     try {
+      cron.stop();
       await relay.stop();
       await consumers.stop();
       await channel.close();
