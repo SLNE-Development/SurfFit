@@ -1,3 +1,4 @@
+import { TRPCProvider } from "@/lib/trpc/client";
 import { Toaster } from "@surffit/ui/components/ui/sonner";
 import { TooltipProvider } from "@surffit/ui/components/ui/tooltip";
 import type { Metadata } from "next";
@@ -30,8 +31,10 @@ export default function RootLayout({
       className={`dark ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <TooltipProvider>{children}</TooltipProvider>
-        <Toaster />
+        <TRPCProvider>
+          <TooltipProvider>{children}</TooltipProvider>
+          <Toaster />
+        </TRPCProvider>
       </body>
     </html>
   );

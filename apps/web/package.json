@@ -11,11 +11,17 @@
   "dependencies": {
     "@surffit/core": "workspace:*",
     "@surffit/db": "workspace:*",
+    "@surffit/trpc": "workspace:*",
     "@surffit/ui": "workspace:*",
+    "@tanstack/react-query": "^5.62.11",
+    "@trpc/client": "^11.0.0",
+    "@trpc/react-query": "^11.0.0",
+    "@trpc/server": "^11.0.0",
     "drizzle-orm": "^0.38.3",
     "next": "16.2.10",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "superjson": "^2.2.2"
   },
   "devDependencies": {
     "@surffit/config": "workspace:*",
