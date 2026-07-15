@@ -13,6 +13,17 @@ export async function SiteHeader() {
       <Link href={route(routes.home, {})} className="font-semibold">
         SurfFit
       </Link>
+      <nav className="flex items-center gap-4 text-sm">
+        <Link
+          href={route(routes.exercises, {})}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          Exercises
+        </Link>
+        <Link href={route(routes.gyms, {})} className="text-muted-foreground hover:text-foreground">
+          Gyms
+        </Link>
+      </nav>
       {session?.user ? (
         <UserMenu
           username={session.user.username}

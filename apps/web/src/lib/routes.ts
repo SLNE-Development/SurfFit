@@ -17,6 +17,21 @@ export const routes = createRoutes({
       account: { path: ["account"] },
     },
   },
+  exercises: {
+    path: ["exercises"],
+    children: {
+      movement: { path: [str("slug")] },
+      submit: { path: ["submit"] },
+    },
+  },
+  gyms: {
+    path: ["gyms"],
+    children: {
+      gym: { path: [str("gymId")] },
+      new: { path: ["new"] },
+    },
+  },
+  moderation: { path: ["moderation"] },
 });
 
 export function route<T extends Parameters<typeof renderPath>[0]>(
