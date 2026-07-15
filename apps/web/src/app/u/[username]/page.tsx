@@ -1,3 +1,4 @@
+import { ReportButton } from "@/components/report-button";
 import { db } from "@/lib/db";
 import { route, routes } from "@/lib/routes";
 import { getAvatarUrl, getStorage } from "@/lib/storage";
@@ -60,7 +61,9 @@ export default async function PublicProfilePage({
             >
               Edit profile
             </Button>
-          ) : null}
+          ) : (
+            <ReportButton subjectType="user" subjectId={profile.id} visible={viewer !== null} />
+          )}
         </CardContent>
       </Card>
     </main>

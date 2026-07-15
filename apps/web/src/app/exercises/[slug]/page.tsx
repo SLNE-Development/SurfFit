@@ -1,3 +1,4 @@
+import { ReportButton } from "@/components/report-button";
 import { db } from "@/lib/db";
 import { auth } from "@surffit/auth";
 import { NotFoundError, createExercisesRepository, createExercisesService } from "@surffit/core";
@@ -26,7 +27,14 @@ export default async function MovementPage({ params }: { params: Promise<{ slug:
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-6 px-4 py-10">
       <div className="flex flex-col gap-2">
-        <h1 className="text-xl font-semibold">{movement.name}</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold">{movement.name}</h1>
+          <ReportButton
+            subjectType="movement"
+            subjectId={movement.id}
+            visible={Boolean(session?.user)}
+          />
+        </div>
         {movement.status !== "approved" ? (
           <Alert>
             <AlertTitle>
@@ -46,7 +54,14 @@ export default async function MovementPage({ params }: { params: Promise<{ slug:
         {movement.variants.map((variant) => (
           <Card key={variant.id}>
             <CardHeader className="flex flex-col gap-2">
-              <h3 className="font-medium">{variant.name}</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="font-medium">{variant.name}</h3>
+                <ReportButton
+                  subjectType="exercise"
+                  subjectId={variant.id}
+                  visible={Boolean(session?.user)}
+                />
+              </div>
               <div className="flex flex-wrap gap-2">
                 <Badge variant="outline">{variant.equipmentSlug}</Badge>
                 {variant.isUnilateral ? <Badge variant="secondary">Unilateral</Badge> : null}

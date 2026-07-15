@@ -1,3 +1,4 @@
+import { ReportButton } from "@/components/report-button";
 import { db } from "@/lib/db";
 import { auth } from "@surffit/auth";
 import {
@@ -38,7 +39,10 @@ export default async function GymPage({ params }: { params: Promise<{ gymId: str
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-10">
       <div className="flex flex-col gap-2">
-        <h1 className="text-xl font-semibold">{gym.name}</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold">{gym.name}</h1>
+          <ReportButton subjectType="gym" subjectId={gym.id} visible={viewer !== null} />
+        </div>
         <p className="text-muted-foreground text-sm">
           {gym.city}, {gym.countryCode}
           {gym.address ? ` — ${gym.address}` : ""}
