@@ -45,24 +45,34 @@ Never hand-write or edit files under `packages/ui/src/components/ui` except styl
 
 ## Where things live
 
-- `packages/core` — domain services (`identity`), event definitions (`events/`), messaging
-  port (`messaging/`), outbox writer/relay (`outbox/`), env loader, logger, domain errors.
+- `packages/core` — domain services (`identity`: profile, preferences, privacy, consents),
+  ABAC engine (`authz/` — `can`/`assertCan`; policies live per-module in `<module>/policies.ts`),
+  S3 storage port (`storage/`), GDPR export/deletion pipeline (`gdpr/`), event definitions
+  (`events/`), messaging port (`messaging/`), outbox writer/relay (`outbox/`), env loader,
+  logger, domain errors.
 - `packages/db` — Drizzle schema, client, migrator, seed script.
 - `packages/trpc` — router, context, error mapping.
 - `packages/auth` — NextAuth v5 config (Discord OAuth, database sessions).
-- `packages/validation` — shared Zod schemas (e.g. username).
+- `packages/validation` — shared Zod schemas (e.g. username, profile, settings).
 - `packages/ui` — shared shadcn component library (`@surffit/ui`).
 - `apps/web` — Next.js app; imports `@surffit/ui`, `@surffit/trpc`, `@surffit/auth`.
-- `apps/worker` — RabbitMQ consumer + outbox relay process.
+- `apps/worker` — RabbitMQ consumer + outbox relay + cron sweep process.
 
 **Add a tRPC procedure:** add to a router file in `packages/trpc/src/routers/`, call a
-`@surffit/core` service — no logic in the procedure itself.
+`@surffit/core` service — no logic in the procedure itself. Build it from `publicProcedure`
+or `protectedProcedure` (authz metadata is mandatory — CI enforces this); resource-level
+checks (beyond session presence) go in the service via `assertCan`.
 
 **Add a migration:** edit the schema in `packages/db/src/schema/`, run `pnpm db:generate`,
 review the generated SQL, then `pnpm db:migrate`.
 
 **Define a new event:** add a `defineEvent` call in `packages/core/src/events/`, register it
 in `events/registry.ts`, and bind a consumer group in `messaging/groups.ts`.
+
+**Reads vs. mutations:** Server Components call core services directly (via the web `db`/
+`storage` singletons). All mutations, and any client-side data fetching, go through tRPC.
+The one exception is `/api/avatar` — a binary multipart upload route that doesn't fit tRPC's
+JSON transport.
 
 ## Conventions
 
@@ -71,3 +81,6 @@ in `events/registry.ts`, and bind a consumer group in `messaging/groups.ts`.
 - Conventional Commits (`type(scope): summary`).
 - TypeScript strict, no `any` — use `unknown` + narrowing.
 - Translation tables with EN fallback and kg-canonical units arrive in a later phase.
+- S3-compatible storage (MinIO in dev) env vars are documented in `.env.example` — treat it
+  as canonical. Storage objects are referenced by key in the DB; URLs are always freshly
+  signed, never persisted.
