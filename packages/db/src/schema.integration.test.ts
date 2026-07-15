@@ -4,7 +4,20 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "./client";
 import { newId } from "./ids";
 import { runMigrations } from "./migrate";
-import { accountDeletionRequests, dataExportRequests, outboxEvents, users } from "./schema";
+import {
+  accountDeletionRequests,
+  dataExportRequests,
+  equipment,
+  equipmentTranslations,
+  exerciseMuscles,
+  exerciseTranslations,
+  exercises,
+  movementTranslations,
+  movements,
+  muscleGroups,
+  outboxEvents,
+  users,
+} from "./schema";
 
 let container: StartedPostgreSqlContainer;
 let db: ReturnType<typeof createDb>;
@@ -160,6 +173,138 @@ describe("gdpr schema", () => {
       db.execute(
         `insert into account_deletion_requests (id, user_id, scheduled_for, status) values ('${newId()}', '${userId}', now(), 'bogus')`,
       ),
+    ).rejects.toThrow();
+  });
+});
+
+describe("exercise content schema", () => {
+  it("creates all nine tables", async () => {
+    const result = await db.execute<{ table_name: string }>(
+      `select table_name from information_schema.tables where table_schema = 'public'`,
+    );
+    const tableNames = result.rows.map((row) => row.table_name);
+
+    expect(tableNames).toEqual(
+      expect.arrayContaining([
+        "movements",
+        "movement_translations",
+        "equipment",
+        "equipment_translations",
+        "muscle_groups",
+        "muscle_group_translations",
+        "exercises",
+        "exercise_translations",
+        "exercise_muscles",
+        "exercise_media",
+      ]),
+    );
+  });
+
+  it("inserts a movement + en translation + an exercise + en translation with a matching search vector", async () => {
+    const movementId = newId();
+    await db
+      .insert(movements)
+      .values({ id: movementId, difficulty: "intermediate", slug: `bench-press-${movementId}` });
+    await db.insert(movementTranslations).values({ movementId, locale: "en", name: "Bench Press" });
+
+    const equipmentId = newId();
+    await db.insert(equipment).values({ id: equipmentId, slug: `barbell-${equipmentId}` });
+    await db.insert(equipmentTranslations).values({ equipmentId, locale: "en", name: "Barbell" });
+
+    const exerciseId = newId();
+    await db.insert(exercises).values({
+      id: exerciseId,
+      movementId,
+      equipmentId,
+      difficulty: "intermediate",
+    });
+    await db.insert(exerciseTranslations).values({
+      exerciseId,
+      locale: "en",
+      name: "Bench Press (Barbell)",
+    });
+
+    const [row] = await db
+      .select()
+      .from(exerciseTranslations)
+      .where(eq(exerciseTranslations.exerciseId, exerciseId));
+
+    expect(row?.search).not.toBeNull();
+
+    const matchResult = await db.execute<{ count: string }>(
+      `select count(*)::text as count from exercise_translations where exercise_id = '${exerciseId}' and search = to_tsvector('simple', 'Bench Press (Barbell)')`,
+    );
+    expect(matchResult.rows[0]?.count).toBe("1");
+  });
+
+  it("enforces the exercises_variant_unique constraint (nulls not distinct) but allows a real owner to duplicate", async () => {
+    const movementId = newId();
+    await db
+      .insert(movements)
+      .values({ id: movementId, difficulty: "beginner", slug: `squat-${movementId}` });
+    await db.insert(movementTranslations).values({ movementId, locale: "en", name: "Squat" });
+
+    const equipmentId = newId();
+    await db.insert(equipment).values({ id: equipmentId, slug: `bodyweight-${equipmentId}` });
+    await db
+      .insert(equipmentTranslations)
+      .values({ equipmentId, locale: "en", name: "Bodyweight" });
+
+    await db.insert(exercises).values({
+      id: newId(),
+      movementId,
+      equipmentId,
+      difficulty: "beginner",
+    });
+
+    await expect(
+      db.insert(exercises).values({
+        id: newId(),
+        movementId,
+        equipmentId,
+        difficulty: "beginner",
+      }),
+    ).rejects.toThrow();
+
+    const ownerId = newId();
+    await db
+      .insert(users)
+      .values({ id: ownerId, displayName: "Owner", email: `${ownerId}@example.com` });
+
+    await expect(
+      db.insert(exercises).values({
+        id: newId(),
+        movementId,
+        equipmentId,
+        difficulty: "beginner",
+        ownerUserId: ownerId,
+      }),
+    ).resolves.not.toThrow();
+  });
+
+  it("rejects a duplicate (exercise, muscleGroup) pair in exercise_muscles", async () => {
+    const movementId = newId();
+    await db
+      .insert(movements)
+      .values({ id: movementId, difficulty: "beginner", slug: `curl-${movementId}` });
+    const equipmentId = newId();
+    await db.insert(equipment).values({ id: equipmentId, slug: `dumbbell-${equipmentId}` });
+    const exerciseId = newId();
+    await db.insert(exercises).values({
+      id: exerciseId,
+      movementId,
+      equipmentId,
+      difficulty: "beginner",
+    });
+    const muscleGroupId = newId();
+    await db
+      .insert(muscleGroups)
+      .values({ id: muscleGroupId, slug: `biceps-${muscleGroupId}`, bodyRegion: "upper" });
+
+    await db.insert(exerciseMuscles).values({ exerciseId, muscleGroupId, role: "primary" });
+
+    await expect(
+      db.insert(exerciseMuscles).values({ exerciseId, muscleGroupId, role: "secondary" }),
     ).rejects.toThrow();
   });
 });
