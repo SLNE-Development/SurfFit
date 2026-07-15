@@ -60,6 +60,10 @@ function createFakeRepository(seedUsers: FakeUser[] = []) {
     username: null as string | null,
     takenUsernames: new Set<string>(),
     users: new Map(seedUsers.map((u) => [u.id, u])),
+    consents: new Map<
+      string,
+      Array<{ consentType: string; policyVersion: string; grantedAt: Date; revokedAt: Date | null }>
+    >(),
   };
 
   function findByUsername(username: string): FakeUser | undefined {
@@ -165,6 +169,20 @@ function createFakeRepository(seedUsers: FakeUser[] = []) {
       user.avatarKey = key;
       return { previousKey };
     },
+    async insertConsents(userId, consents) {
+      const existing = state.consents.get(userId) ?? [];
+      const now = new Date();
+      const inserted = consents.map((c) => ({
+        consentType: c.consentType,
+        policyVersion: c.policyVersion,
+        grantedAt: now,
+        revokedAt: null as Date | null,
+      }));
+      state.consents.set(userId, [...existing, ...inserted]);
+    },
+    async listConsents(userId) {
+      return state.consents.get(userId) ?? [];
+    },
   };
 
   return { repo, state };
@@ -200,7 +218,10 @@ describe("identityService.claimUsername", () => {
     const { repo, state } = createFakeRepository();
     const service = createIdentityService(repo);
 
-    const result = await service.claimUsername("user-1", "SurfFan");
+    const result = await service.claimUsername("user-1", {
+      username: "SurfFan",
+      acceptPolicies: true,
+    });
 
     expect(result).toEqual({ id: "user-1", username: "surffan" });
     expect(state.username).toBe("surffan");
@@ -211,9 +232,9 @@ describe("identityService.claimUsername", () => {
     const { repo } = createFakeRepository();
     const service = createIdentityService(repo);
 
-    await expect(service.claimUsername("user-1", "ab")).rejects.toBeInstanceOf(
-      DomainRuleViolationError,
-    );
+    await expect(
+      service.claimUsername("user-1", { username: "ab", acceptPolicies: true }),
+    ).rejects.toBeInstanceOf(DomainRuleViolationError);
   });
 
   it("throws ConflictError with identity.username.taken when the username is taken", async () => {
@@ -221,7 +242,9 @@ describe("identityService.claimUsername", () => {
     state.takenUsernames.add("surffan");
     const service = createIdentityService(repo);
 
-    await expect(service.claimUsername("user-1", "surffan")).rejects.toMatchObject({
+    await expect(
+      service.claimUsername("user-1", { username: "surffan", acceptPolicies: true }),
+    ).rejects.toMatchObject({
       i18nKey: "identity.username.taken",
     });
   });
@@ -230,9 +253,11 @@ describe("identityService.claimUsername", () => {
     const { repo } = createFakeRepository();
     const service = createIdentityService(repo);
 
-    await service.claimUsername("user-1", "surffan");
+    await service.claimUsername("user-1", { username: "surffan", acceptPolicies: true });
 
-    await expect(service.claimUsername("user-1", "otherName")).rejects.toMatchObject({
+    await expect(
+      service.claimUsername("user-1", { username: "otherName", acceptPolicies: true }),
+    ).rejects.toMatchObject({
       i18nKey: "identity.alreadyOnboarded",
     });
   });
@@ -241,11 +266,47 @@ describe("identityService.claimUsername", () => {
     const { repo } = createFakeRepository();
     const service = createIdentityService(repo);
 
-    await service.claimUsername("user-1", "surffan");
+    await service.claimUsername("user-1", { username: "surffan", acceptPolicies: true });
 
-    await expect(service.claimUsername("user-1", "otherName")).rejects.toBeInstanceOf(
-      ConflictError,
-    );
+    await expect(
+      service.claimUsername("user-1", { username: "otherName", acceptPolicies: true }),
+    ).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it("rejects with validation.consent.required when acceptPolicies is false and writes nothing", async () => {
+    const { repo, state } = createFakeRepository();
+    const service = createIdentityService(repo);
+
+    await expect(
+      service.claimUsername("user-1", { username: "surffan", acceptPolicies: false }),
+    ).rejects.toMatchObject({ i18nKey: "validation.consent.required" });
+
+    expect(state.username).toBeNull();
+    expect(state.consents.get("user-1")).toBeUndefined();
+  });
+
+  it("writes exactly two consent rows (terms + privacy) at POLICY_VERSION on a successful claim", async () => {
+    const { repo, state } = createFakeRepository();
+    const service = createIdentityService(repo);
+
+    await service.claimUsername("user-1", { username: "surffan", acceptPolicies: true });
+
+    const consents = state.consents.get("user-1") ?? [];
+    expect(consents).toHaveLength(2);
+    expect(consents.map((c) => c.consentType).sort()).toEqual(["privacy", "terms"]);
+    expect(consents.every((c) => c.policyVersion === "2026-07-15")).toBe(true);
+  });
+});
+
+describe("identityService.listConsents", () => {
+  it("returns inserted consent rows", async () => {
+    const { repo } = createFakeRepository();
+    const service = createIdentityService(repo);
+
+    await service.claimUsername("user-1", { username: "surffan", acceptPolicies: true });
+    const consents = await service.listConsents("user-1");
+
+    expect(consents).toHaveLength(2);
   });
 });
 

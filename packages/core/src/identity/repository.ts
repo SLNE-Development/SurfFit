@@ -192,6 +192,29 @@ export function createIdentityRepository(db: Db): IdentityRepository {
         .where(eq(schema.users.id, userId));
       return { previousKey: previous?.avatarKey ?? null };
     },
+    async insertConsents(userId, consents, tx) {
+      if (consents.length === 0) return;
+      const executor = (tx as Tx | undefined) ?? db;
+      await executor.insert(schema.userConsents).values(
+        consents.map((c) => ({
+          userId,
+          consentType: c.consentType,
+          policyVersion: c.policyVersion,
+        })),
+      );
+    },
+    async listConsents(userId) {
+      return db
+        .select({
+          consentType: schema.userConsents.consentType,
+          policyVersion: schema.userConsents.policyVersion,
+          grantedAt: schema.userConsents.grantedAt,
+          revokedAt: schema.userConsents.revokedAt,
+        })
+        .from(schema.userConsents)
+        .where(eq(schema.userConsents.userId, userId))
+        .orderBy(schema.userConsents.grantedAt);
+    },
   };
 }
 

@@ -4,10 +4,10 @@ import { protectedProcedure, router } from "../trpc";
 
 export const identityRouter = router({
   claimUsername: protectedProcedure
-    .input(z.object({ username: z.string() }))
+    .input(z.object({ username: z.string(), acceptPolicies: z.boolean() }))
     .mutation(async ({ ctx, input }) => {
       const service = createIdentityService(createIdentityRepository(ctx.db));
-      return service.claimUsername(ctx.session.user.id, input.username);
+      return service.claimUsername(ctx.session.user.id, input);
     }),
 
   usernameAvailable: protectedProcedure

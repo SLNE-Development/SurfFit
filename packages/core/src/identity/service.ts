@@ -9,6 +9,7 @@ import { assertCan, can } from "../authz/engine";
 import { ConflictError, DomainRuleViolationError, NotFoundError } from "../errors";
 import type { EventEnvelope } from "../events/envelope";
 import { userRegisteredEvent } from "../events/user-registered";
+import { POLICY_VERSION, SIGNUP_CONSENT_TYPES } from "./consent";
 import { manageOwnAccountPolicy, viewProfilePolicy } from "./policies";
 
 export type ProfileVisibility = "public" | "following" | "private";
@@ -79,6 +80,16 @@ export type IdentityRepository = {
     fields: { displayName: string | null; biography: string | null },
   ) => Promise<UserRecord>;
   setAvatarKey: (userId: string, key: string | null) => Promise<{ previousKey: string | null }>;
+  insertConsents: (
+    userId: string,
+    consents: { consentType: string; policyVersion: string }[],
+    tx?: unknown,
+  ) => Promise<void>;
+  listConsents: (
+    userId: string,
+  ) => Promise<
+    Array<{ consentType: string; policyVersion: string; grantedAt: Date; revokedAt: Date | null }>
+  >;
 };
 
 export function createIdentityService(repo: IdentityRepository) {
@@ -98,9 +109,13 @@ export function createIdentityService(repo: IdentityRepository) {
 
     async claimUsername(
       userId: string,
-      rawUsername: string,
+      input: { username: string; acceptPolicies: boolean },
     ): Promise<{ id: string; username: string }> {
-      const result = usernameSchema.safeParse(rawUsername);
+      if (!input.acceptPolicies) {
+        throw new DomainRuleViolationError("validation.consent.required");
+      }
+
+      const result = usernameSchema.safeParse(input.username);
       if (!result.success) {
         throw new DomainRuleViolationError(
           result.error.issues[0]?.message ?? "validation.username.format",
@@ -113,12 +128,23 @@ export function createIdentityService(repo: IdentityRepository) {
         throw new ConflictError("identity.alreadyOnboarded");
       }
 
-      const outcome = await repo.setUsername(userId, username);
-      if (outcome === "taken") {
-        throw new ConflictError("identity.username.taken");
-      }
+      return repo.withTransaction(async (tx) => {
+        const outcome = await repo.setUsername(userId, username, tx);
+        if (outcome === "taken") {
+          throw new ConflictError("identity.username.taken");
+        }
 
-      return { id: userId, username };
+        await repo.insertConsents(
+          userId,
+          SIGNUP_CONSENT_TYPES.map((consentType) => ({
+            consentType,
+            policyVersion: POLICY_VERSION,
+          })),
+          tx,
+        );
+
+        return { id: userId, username };
+      });
     },
 
     async isUsernameAvailable(rawUsername: string): Promise<boolean> {
@@ -231,6 +257,10 @@ export function createIdentityService(repo: IdentityRepository) {
 
     async clearAvatar(userId: string) {
       return repo.setAvatarKey(userId, null);
+    },
+
+    async listConsents(userId: string) {
+      return repo.listConsents(userId);
     },
   };
 }

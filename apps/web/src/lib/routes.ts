@@ -5,6 +5,8 @@ export const routes = createRoutes({
   home: { path: [] },
   signin: { path: ["signin"] },
   onboarding: { path: ["onboarding"] },
+  terms: { path: ["terms"] },
+  privacy: { path: ["privacy"] },
 });
 
 export function route<T extends Parameters<typeof renderPath>[0]>(

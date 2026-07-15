@@ -46,9 +46,19 @@ describe("trpc router", () => {
 
   it("rejects an anonymous identity.claimUsername call with UNAUTHORIZED", async () => {
     const caller = appRouter.createCaller(makeContext(null));
-    await expect(caller.identity.claimUsername({ username: "surffan" })).rejects.toMatchObject({
+    await expect(
+      caller.identity.claimUsername({ username: "surffan", acceptPolicies: true }),
+    ).rejects.toMatchObject({
       code: "UNAUTHORIZED",
     });
+  });
+
+  it("rejects identity.claimUsername with the old ({username} only) input shape via Zod", async () => {
+    const caller = appRouter.createCaller(makeContext({ user: { id: "user-1" } }));
+    await expect(
+      // biome-ignore lint/suspicious/noExplicitAny: intentionally passing a legacy input shape
+      caller.identity.claimUsername({ username: "surffan" } as any),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 
   it("rejects a procedure with no authz meta with FORBIDDEN", async () => {
