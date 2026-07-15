@@ -15,6 +15,12 @@
 
 **pnpm only.** Never run `npm` or `yarn` — the root `preinstall` script blocks it.
 
+## Executing superpowers plans
+
+When implementing a plan under `docs/superpowers/plans/`, use `superpowers:executing-plans`,
+not `superpowers:subagent-driven-development`, regardless of what the plan file's own header
+suggests.
+
 ## Architecture rules
 
 - Business logic lives only in `@surffit/core` services.

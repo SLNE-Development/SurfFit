@@ -1,6 +1,6 @@
 # SurfFit Phase 2 — User System Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans (recommended by project owner) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 > **No literal code by design (user directive, saves tokens).** Steps describe tests and implementations precisely in prose — exact file paths, exported names, signatures, commands, and expected outcomes. Write the code yourself from these descriptions. If a described name/signature conflicts with something, follow the plan's name.
 
