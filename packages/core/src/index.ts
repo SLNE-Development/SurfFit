@@ -12,3 +12,4 @@ export * from "./messaging/groups";
 export * from "./outbox/write";
 export * from "./outbox/relay";
 export * from "./identity";
+export * from "./storage";
