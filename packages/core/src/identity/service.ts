@@ -33,6 +33,8 @@ export type UserRecord = {
   biography: string | null;
   avatarKey: string | null;
   email: string;
+  locale: string;
+  createdAt: Date;
 };
 
 export type PreferencesRecord = {

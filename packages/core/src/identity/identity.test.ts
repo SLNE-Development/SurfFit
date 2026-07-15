@@ -123,6 +123,8 @@ function createFakeRepository(seedUsers: FakeUser[] = []) {
         biography: user.biography,
         avatarKey: user.avatarKey,
         email: user.email,
+        locale: "en",
+        createdAt: new Date("2026-01-01T00:00:00Z"),
       };
     },
     async getUserRoles(userId) {
@@ -160,6 +162,8 @@ function createFakeRepository(seedUsers: FakeUser[] = []) {
         biography: user.biography,
         avatarKey: user.avatarKey,
         email: user.email,
+        locale: "en",
+        createdAt: new Date("2026-01-01T00:00:00Z"),
       };
     },
     async setAvatarKey(userId, key) {

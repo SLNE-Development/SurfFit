@@ -86,6 +86,8 @@ export function createIdentityRepository(db: Db): IdentityRepository {
           biography: schema.users.biography,
           avatarKey: schema.users.avatarKey,
           email: schema.users.email,
+          locale: schema.users.locale,
+          createdAt: schema.users.createdAt,
         })
         .from(schema.users)
         .where(eq(schema.users.id, userId));
@@ -175,6 +177,8 @@ export function createIdentityRepository(db: Db): IdentityRepository {
           biography: schema.users.biography,
           avatarKey: schema.users.avatarKey,
           email: schema.users.email,
+          locale: schema.users.locale,
+          createdAt: schema.users.createdAt,
         })
         .from(schema.users)
         .where(eq(schema.users.id, userId));
