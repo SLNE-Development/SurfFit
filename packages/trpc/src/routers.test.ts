@@ -10,9 +10,10 @@ const fakeLogger = {
 } as unknown as Context["logger"];
 
 const fakeDb = {} as Context["db"];
+const fakeStorage = {} as Context["storage"];
 
 function makeContext(session: Context["session"] = null): Context {
-  return { session, db: fakeDb, logger: fakeLogger };
+  return { session, db: fakeDb, logger: fakeLogger, storage: fakeStorage };
 }
 
 describe("profile router", () => {
@@ -42,5 +43,18 @@ describe("settings router", () => {
     } catch (err) {
       expect(String((err as Error).message)).toContain("validation.preferences.range");
     }
+  });
+});
+
+describe("gdpr router", () => {
+  it("rejects every gdpr procedure anonymously with UNAUTHORIZED", async () => {
+    const caller = appRouter.createCaller(makeContext(null));
+
+    await expect(caller.gdpr.requestExport()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.gdpr.exportStatus()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.gdpr.requestDeletion()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.gdpr.cancelDeletion()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.gdpr.deletionStatus()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.gdpr.consents()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
   });
 });

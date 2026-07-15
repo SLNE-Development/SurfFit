@@ -1,4 +1,5 @@
 import { router } from "../trpc";
+import { gdprRouter } from "./gdpr";
 import { healthRouter } from "./health";
 import { identityRouter } from "./identity";
 import { profileRouter } from "./profile";
@@ -9,6 +10,7 @@ export const appRouter = router({
   identity: identityRouter,
   profile: profileRouter,
   settings: settingsRouter,
+  gdpr: gdprRouter,
 });
 
 export type AppRouter = typeof appRouter;

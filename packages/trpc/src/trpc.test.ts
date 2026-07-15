@@ -12,9 +12,10 @@ const fakeLogger = {
 } as unknown as Context["logger"];
 
 const fakeDb = {} as Context["db"];
+const fakeStorage = {} as Context["storage"];
 
 function makeContext(session: Context["session"] = null): Context {
-  return { session, db: fakeDb, logger: fakeLogger };
+  return { session, db: fakeDb, logger: fakeLogger, storage: fakeStorage };
 }
 
 const testRouter = router({

@@ -1,4 +1,4 @@
-import type { createLogger } from "@surffit/core";
+import type { StorageProvider, createLogger } from "@surffit/core";
 import type { Db } from "@surffit/db";
 
 export type Session = {
@@ -9,6 +9,7 @@ export type Context = {
   session: Session;
   db: Db;
   logger: ReturnType<typeof createLogger>;
+  storage: StorageProvider;
 };
 
 export function createContext(opts: Context): Context {

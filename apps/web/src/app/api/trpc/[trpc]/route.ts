@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { getStorage } from "@/lib/storage";
 import { auth } from "@surffit/auth";
 import { createLogger } from "@surffit/core";
 import { appRouter, createContext } from "@surffit/trpc";
@@ -10,12 +11,13 @@ function handler(req: Request) {
     req,
     router: appRouter,
     createContext: async () => {
-      const session = await auth();
+      const [session, storage] = await Promise.all([auth(), getStorage()]);
 
       return createContext({
         session: session?.user ? { user: { id: session.user.id } } : null,
         db,
         logger: createLogger("trpc"),
+        storage,
       });
     },
   });
