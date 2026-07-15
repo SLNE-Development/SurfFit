@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { auth } from "@surffit/auth";
 import { createLogger } from "@surffit/core";
 import { appRouter, createContext } from "@surffit/trpc";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
@@ -8,13 +9,15 @@ function handler(req: Request) {
     endpoint: "/api/trpc",
     req,
     router: appRouter,
-    createContext: () =>
-      createContext({
-        // TODO(Task 11): resolve the real session via auth() once @surffit/auth exists.
-        session: null,
+    createContext: async () => {
+      const session = await auth();
+
+      return createContext({
+        session: session?.user ? { user: { id: session.user.id } } : null,
         db,
         logger: createLogger("trpc"),
-      }),
+      });
+    },
   });
 }
 

@@ -11,3 +11,4 @@ export * from "./messaging/consumer";
 export * from "./messaging/groups";
 export * from "./outbox/write";
 export * from "./outbox/relay";
+export * from "./identity";

@@ -9,6 +9,7 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@surffit/auth": "workspace:*",
     "@surffit/core": "workspace:*",
     "@surffit/db": "workspace:*",
     "@surffit/trpc": "workspace:*",
