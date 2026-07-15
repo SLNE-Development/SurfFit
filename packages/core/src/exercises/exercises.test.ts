@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { can } from "../authz/engine";
+import { ConflictError, NotFoundError } from "../errors";
 import { viewContentPolicy } from "./policies";
 import { type ExercisesRepository, createExercisesService } from "./service";
 
@@ -28,6 +29,28 @@ function makeRepo(overrides: Partial<ExercisesRepository> = {}): ExercisesReposi
     },
     async findMovementDetailBySlug() {
       return null;
+    },
+    async withTransaction(fn) {
+      return fn(undefined);
+    },
+    async writeEvent() {},
+    async insertMovement() {
+      return { id: "new-movement" };
+    },
+    async insertMovementTranslation() {},
+    async insertExercise() {
+      return { id: "new-exercise" };
+    },
+    async insertExerciseTranslation() {},
+    async insertExerciseMuscles() {},
+    async findMovementForSubmission() {
+      return null;
+    },
+    async equipmentExists() {
+      return null;
+    },
+    async muscleGroupsExist() {
+      return true;
     },
     ...overrides,
   };
@@ -217,4 +240,152 @@ describe("viewContentPolicy", () => {
       expect(result).toBe(testCase.expected);
     });
   }
+});
+
+describe("exercises service — submitMovement", () => {
+  it("writes a movement + en translation + one content.submitted envelope in a tx and returns the slug", async () => {
+    const writtenEnvelopes: unknown[] = [];
+    let insertedTranslation: unknown;
+    const repo = makeRepo({
+      insertMovement: async () => ({ id: "movement-1" }),
+      insertMovementTranslation: async (input) => {
+        insertedTranslation = input;
+      },
+      writeEvent: async (envelope) => {
+        writtenEnvelopes.push(envelope);
+      },
+    });
+    const service = createExercisesService(repo);
+
+    const result = await service.submitMovement(OWNER_ID, {
+      name: "Bench Press",
+      difficulty: "intermediate",
+    });
+
+    expect(result).toEqual({ id: "movement-1", slug: "bench-press" });
+    expect(insertedTranslation).toMatchObject({ name: "Bench Press", locale: "en" });
+    expect(writtenEnvelopes).toHaveLength(1);
+  });
+
+  it("retries on a slug collision up to -2 before succeeding", async () => {
+    let attempts = 0;
+    const repo = makeRepo({
+      insertMovement: async (input) => {
+        attempts++;
+        if (input.slug === "bench-press") {
+          const err = new Error("dup") as Error & { code: string };
+          err.code = "23505";
+          throw err;
+        }
+        return { id: "movement-2" };
+      },
+    });
+    const service = createExercisesService(repo);
+
+    const result = await service.submitMovement(OWNER_ID, {
+      name: "Bench Press",
+      difficulty: "intermediate",
+    });
+
+    expect(result.slug).toBe("bench-press-2");
+    expect(attempts).toBe(2);
+  });
+
+  it("throws ConflictError after ten collisions", async () => {
+    const repo = makeRepo({
+      insertMovement: async () => {
+        const err = new Error("dup") as Error & { code: string };
+        err.code = "23505";
+        throw err;
+      },
+    });
+    const service = createExercisesService(repo);
+
+    await expect(
+      service.submitMovement(OWNER_ID, { name: "Bench Press", difficulty: "intermediate" }),
+    ).rejects.toThrow(ConflictError);
+  });
+});
+
+describe("exercises service — submitExercise", () => {
+  const approvedMovementForSubmission = {
+    id: MOVEMENT_ID,
+    slug: "bench-press",
+    status: "approved" as const,
+    ownerUserId: null,
+    deletedAt: null,
+    name: "Bench Press",
+  };
+
+  it("rejects submitting a variant against a stranger's pending movement", async () => {
+    const repo = makeRepo({
+      findMovementForSubmission: async () => ({
+        ...approvedMovementForSubmission,
+        status: "pending",
+        ownerUserId: OWNER_ID,
+      }),
+    });
+    const service = createExercisesService(repo);
+
+    await expect(
+      service.submitExercise(STRANGER_ID, {
+        movementId: MOVEMENT_ID,
+        equipmentId: "eq1",
+        difficulty: "intermediate",
+        primaryMuscleGroupId: "mg1",
+      }),
+    ).rejects.toThrow(NotFoundError);
+  });
+
+  it("throws exercises.variant.exists on a duplicate variant", async () => {
+    const repo = makeRepo({
+      findMovementForSubmission: async () => approvedMovementForSubmission,
+      equipmentExists: async () => ({ id: "eq1", name: "Barbell" }),
+      insertExercise: async () => {
+        const err = new Error("dup") as Error & { code: string };
+        err.code = "23505";
+        throw err;
+      },
+    });
+    const service = createExercisesService(repo);
+
+    await expect(
+      service.submitExercise(OWNER_ID, {
+        movementId: MOVEMENT_ID,
+        equipmentId: "eq1",
+        difficulty: "intermediate",
+        primaryMuscleGroupId: "mg1",
+      }),
+    ).rejects.toMatchObject({ i18nKey: "exercises.variant.exists" });
+  });
+
+  it("generates the default name from movement + equipment en names and includes exactly one primary muscle", async () => {
+    let insertedTranslationName: string | undefined;
+    let insertedMuscles: { muscleGroupId: string; role: string }[] = [];
+    const repo = makeRepo({
+      findMovementForSubmission: async () => approvedMovementForSubmission,
+      equipmentExists: async () => ({ id: "eq1", name: "Barbell" }),
+      insertExercise: async () => ({ id: "exercise-1" }),
+      insertExerciseTranslation: async (input) => {
+        insertedTranslationName = input.name;
+      },
+      insertExerciseMuscles: async (rows) => {
+        insertedMuscles = rows;
+      },
+    });
+    const service = createExercisesService(repo);
+
+    const result = await service.submitExercise(OWNER_ID, {
+      movementId: MOVEMENT_ID,
+      equipmentId: "eq1",
+      difficulty: "intermediate",
+      primaryMuscleGroupId: "mg1",
+      secondaryMuscleGroupIds: ["mg2"],
+    });
+
+    expect(result).toEqual({ id: "exercise-1", movementSlug: "bench-press" });
+    expect(insertedTranslationName).toBe("Bench Press (Barbell)");
+    expect(insertedMuscles.filter((m) => m.role === "primary")).toHaveLength(1);
+    expect(insertedMuscles).toHaveLength(2);
+  });
 });

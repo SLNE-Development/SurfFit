@@ -1,8 +1,9 @@
 import { schema } from "@surffit/db";
 import type { Db } from "@surffit/db";
-import { and, asc, desc, eq, exists, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, exists, inArray, isNull, or, sql } from "drizzle-orm";
 import { type AnyPgColumn, alias } from "drizzle-orm/pg-core";
 import { FALLBACK_LOCALE } from "../locale";
+import { writeOutbox } from "../outbox/write";
 import type { ExercisesRepository } from "./service";
 
 const {
@@ -17,6 +18,8 @@ const {
   exerciseMuscles,
   userRoles,
 } = schema;
+
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 function visibilityCondition(
   ownerColumn: AnyPgColumn,
@@ -370,6 +373,115 @@ export function createExercisesRepository(db: Db): ExercisesRepository {
           muscles: musclesByExercise.get(variant.id) ?? [],
         })),
       };
+    },
+
+    async withTransaction(fn) {
+      return db.transaction((tx) => fn(tx));
+    },
+
+    async writeEvent(envelope, tx) {
+      await writeOutbox(tx as Tx, envelope);
+    },
+
+    async insertMovement(input, tx) {
+      const executor = (tx as Tx | undefined) ?? db;
+      const [row] = await executor
+        .insert(movements)
+        .values({
+          slug: input.slug,
+          difficulty: input.difficulty,
+          ownerUserId: input.ownerUserId,
+          status: "pending",
+        })
+        .returning({ id: movements.id });
+      if (!row) throw new Error("failed to insert movement");
+      return row;
+    },
+
+    async insertMovementTranslation(input, tx) {
+      const executor = (tx as Tx | undefined) ?? db;
+      await executor.insert(movementTranslations).values({
+        movementId: input.movementId,
+        locale: input.locale,
+        name: input.name,
+        description: input.description,
+      });
+    },
+
+    async insertExercise(input, tx) {
+      const executor = (tx as Tx | undefined) ?? db;
+      const [row] = await executor
+        .insert(exercises)
+        .values({
+          movementId: input.movementId,
+          equipmentId: input.equipmentId,
+          difficulty: input.difficulty,
+          ownerUserId: input.ownerUserId,
+          isUnilateral: input.isUnilateral,
+          status: "pending",
+        })
+        .returning({ id: exercises.id });
+      if (!row) throw new Error("failed to insert exercise");
+      return row;
+    },
+
+    async insertExerciseTranslation(input, tx) {
+      const executor = (tx as Tx | undefined) ?? db;
+      await executor.insert(exerciseTranslations).values({
+        exerciseId: input.exerciseId,
+        locale: input.locale,
+        name: input.name,
+        description: input.description,
+        instructions: input.instructions,
+      });
+    },
+
+    async insertExerciseMuscles(input, tx) {
+      if (input.length === 0) return;
+      const executor = (tx as Tx | undefined) ?? db;
+      await executor.insert(exerciseMuscles).values(
+        input.map((row) => ({
+          exerciseId: row.exerciseId,
+          muscleGroupId: row.muscleGroupId,
+          role: row.role,
+        })),
+      );
+    },
+
+    async findMovementForSubmission(movementId) {
+      const enT = alias(movementTranslations, "en_t");
+      const [row] = await db
+        .select({
+          id: movements.id,
+          slug: movements.slug,
+          status: movements.status,
+          ownerUserId: movements.ownerUserId,
+          deletedAt: movements.deletedAt,
+          name: enT.name,
+        })
+        .from(movements)
+        .innerJoin(enT, and(eq(enT.movementId, movements.id), eq(enT.locale, FALLBACK_LOCALE)))
+        .where(eq(movements.id, movementId));
+      return row ?? null;
+    },
+
+    async equipmentExists(equipmentId) {
+      const enT = alias(equipmentTranslations, "en_t");
+      const [row] = await db
+        .select({ id: equipment.id, name: enT.name })
+        .from(equipment)
+        .innerJoin(enT, and(eq(enT.equipmentId, equipment.id), eq(enT.locale, FALLBACK_LOCALE)))
+        .where(eq(equipment.id, equipmentId));
+      return row ?? null;
+    },
+
+    async muscleGroupsExist(muscleGroupIds) {
+      if (muscleGroupIds.length === 0) return true;
+      const rows = await db
+        .select({ id: muscleGroups.id })
+        .from(muscleGroups)
+        .where(inArray(muscleGroups.id, muscleGroupIds));
+      return new Set(rows.map((r) => r.id)).size === new Set(muscleGroupIds).size;
     },
   };
 }

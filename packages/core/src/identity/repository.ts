@@ -1,4 +1,4 @@
-import { schema } from "@surffit/db";
+import { isUniqueViolation, schema } from "@surffit/db";
 import type { Db } from "@surffit/db";
 import { and, eq, isNull } from "drizzle-orm";
 import { writeOutbox } from "../outbox/write";
@@ -220,13 +220,4 @@ export function createIdentityRepository(db: Db): IdentityRepository {
         .orderBy(schema.userConsents.grantedAt);
     },
   };
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code: unknown }).code === "23505"
-  );
 }

@@ -1,5 +1,6 @@
 import { createDb, newId, runMigrations, schema } from "@surffit/db";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createExercisesRepository } from "./repository";
 import { createExercisesService } from "./service";
@@ -147,5 +148,59 @@ describe("exercises module integration", () => {
     expect(detail.variants.length).toBeGreaterThanOrEqual(2);
     const barbellVariant = detail.variants.find((v) => v.equipmentSlug.startsWith("barbell-"));
     expect(barbellVariant?.muscles.some((m) => m.slug.startsWith("chest-"))).toBe(true);
+  });
+});
+
+describe("exercises module integration — community submissions", () => {
+  it("round-trips submitMovement + submitExercise as pending, visible only to the submitter", async () => {
+    const { chestId, barbellId } = await seedFixtures();
+    const service = createExercisesService(createExercisesRepository(db));
+
+    const submitterId = newId();
+    await db
+      .insert(schema.users)
+      .values({ id: submitterId, displayName: "Submitter", email: `${submitterId}@example.com` });
+
+    const uniqueName = `Cable Fly ${newId()}`;
+    const movementResult = await service.submitMovement(submitterId, {
+      name: uniqueName,
+      difficulty: "beginner",
+    });
+
+    const exerciseResult = await service.submitExercise(submitterId, {
+      movementId: movementResult.id,
+      equipmentId: barbellId,
+      difficulty: "beginner",
+      primaryMuscleGroupId: chestId,
+    });
+
+    const [movementRow] = await db
+      .select()
+      .from(schema.movements)
+      .where(eq(schema.movements.id, movementResult.id));
+    expect(movementRow?.status).toBe("pending");
+
+    const [exerciseRow] = await db
+      .select()
+      .from(schema.exercises)
+      .where(eq(schema.exercises.id, exerciseResult.id));
+    expect(exerciseRow?.status).toBe("pending");
+
+    const outboxRows = await db
+      .select()
+      .from(schema.outboxEvents)
+      .where(eq(schema.outboxEvents.eventType, "content.submitted"));
+    expect(outboxRows.length).toBeGreaterThanOrEqual(2);
+
+    const asSubmitter = await service.getMovementBySlug(
+      { id: submitterId },
+      "en",
+      movementResult.slug,
+    );
+    expect(asSubmitter.isOwner).toBe(true);
+
+    await expect(service.getMovementBySlug(null, "en", movementResult.slug)).rejects.toThrow(
+      "exercises.movement.notFound",
+    );
   });
 });
