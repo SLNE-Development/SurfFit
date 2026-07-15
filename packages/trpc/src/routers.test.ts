@@ -46,6 +46,49 @@ describe("settings router", () => {
   });
 });
 
+describe("exercises router", () => {
+  it("rejects anonymous exercises.submitMovement with UNAUTHORIZED", async () => {
+    const caller = appRouter.createCaller(makeContext(null));
+    await expect(
+      caller.exercises.submitMovement({ name: "Bench Press", difficulty: "beginner" }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("rejects exercises.search with limit 500 with BAD_REQUEST before touching the db", async () => {
+    const caller = appRouter.createCaller(makeContext(null));
+    await expect(
+      caller.exercises.search({ locale: "en", query: "bench", limit: 500 }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("marks filters/movements/search as public authz meta", () => {
+    const procedures = appRouter._def.procedures as unknown as Record<
+      string,
+      { _def: { meta?: { authz?: string } } }
+    >;
+    expect(procedures["exercises.filters"]?._def.meta?.authz).toBe("public");
+    expect(procedures["exercises.movements"]?._def.meta?.authz).toBe("public");
+    expect(procedures["exercises.search"]?._def.meta?.authz).toBe("public");
+  });
+});
+
+describe("gyms router", () => {
+  it("rejects anonymous gyms.create with UNAUTHORIZED", async () => {
+    const caller = appRouter.createCaller(makeContext(null));
+    await expect(
+      caller.gyms.create({ name: "Iron Paradise", city: "Berlin", countryCode: "de" }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("marks gyms.search as public authz meta", () => {
+    const procedures = appRouter._def.procedures as unknown as Record<
+      string,
+      { _def: { meta?: { authz?: string } } }
+    >;
+    expect(procedures["gyms.search"]?._def.meta?.authz).toBe("public");
+  });
+});
+
 describe("gdpr router", () => {
   it("rejects every gdpr procedure anonymously with UNAUTHORIZED", async () => {
     const caller = appRouter.createCaller(makeContext(null));
