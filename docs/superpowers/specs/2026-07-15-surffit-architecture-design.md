@@ -14,12 +14,16 @@ SurfFit is an open-source fitness platform: strength training, workout tracking,
 | Constraint | Decision |
 | --- | --- |
 | Delivery model | Blueprint first; implementation happens phase-by-phase in later sessions, each with its own spec and plan |
-| Deployment target | Coolify (self-hosted Docker). One image per process; Postgres/Redis/MinIO as attached services. No serverless assumptions anywhere |
+| Deployment target | Coolify (self-hosted Docker). One image per process; Postgres/RabbitMQ/Redis/MinIO as attached services. No serverless assumptions anywhere |
 | Scaling model | Worker processes are queue-selectable: the same worker image can be deployed multiple times with different `WORKER_QUEUES` values to scale domains (e.g. achievements) independently |
 | Offline behavior | The active workout session must survive connection loss (local persistence + sync). All other actions (comments, likes, etc.) are disabled while offline |
 | i18n | English is the base locale; German ships at launch. Exercise/achievement content is translatable at the database level via `*_translations` tables |
 | Operation | An official hosted instance operated by the maintainer + self-hosting for anyone. GDPR, data export, and moderation are launch requirements, not future work |
 | Auth | OAuth only (Discord first), no passwords. Username claimed on first login |
+| Messaging | RabbitMQ is the broker for all cross-process messaging (domain events, worker queues, realtime fan-out); Redis is scoped to caching and rate limiting (revised 2026-07-15, was BullMQ/Redis) |
+| UI components | shadcn/ui base components are always added via the shadcn CLI (`pnpm dlx shadcn@latest add <component>`), never written by hand or guessed |
+| Package manager | pnpm exclusively, enforced by tooling (`packageManager` field, preinstall guard, CI lockfile check) |
+| Agent onboarding | A root `CLAUDE.md` tells AI coding agents how to work in this repository; kept in sync with conventions |
 
 ---
 
@@ -35,22 +39,24 @@ Three deployable units, each its own Docker image:
 │  (PWA-ready) │                     │  UI + tRPC + Auth.js      │
 └─────────────┘                     └───────────┬──────────────┘
                                                 │ services (packages/core)
-                    ┌───────────────────────────┼───────────────┐
-                    ▼                           ▼               ▼
-              ┌──────────┐               ┌──────────┐    ┌───────────┐
-              │ Postgres  │◄─── BullMQ ──│  Redis    │    │ MinIO/S3  │
-              └─────┬────┘               └────┬─────┘    └───────────┘
-                    │ outbox relay            │ queues + pub/sub
-                    ▼                         ▼
-              ┌────────────────────────────────────┐
-              │ worker (Node, queue-selectable)     │
-              │ achievements · feed · notifications │
-              │ emails · stats · exports            │
-              └────────────────────────────────────┘
+                ┌─────────────────┬─────────────┼───────────────┐
+                ▼                 ▼             ▼               ▼
+          ┌──────────┐     ┌────────────┐ ┌──────────┐   ┌───────────┐
+          │ Postgres  │     │  RabbitMQ  │ │  Redis   │   │ MinIO/S3  │
+          │ + outbox  │     │ exchanges  │ │ (cache)  │   └───────────┘
+          └─────┬────┘     │ + queues   │ └──────────┘
+                │          └──┬─────▲───┘
+    outbox rows │     consume │     │ publish (relay, confirms)
+                ▼             ▼     │
+          ┌───────────────────┴─────────────────────┐
+          │ worker (Node, queue-selectable)          │
+          │ relay · cron · achievements · feed       │
+          │ notifications · emails · stats · exports │
+          └──────────────────────────────────────────┘
 ```
 
 - **`web`** — Next.js App Router, `output: "standalone"`. Hosts the UI, the tRPC API (route handler), Auth.js, and the SSE endpoint for realtime updates. Server Components for read-heavy pages; all mutations via tRPC procedures. Server Actions are permitted only as thin wrappers that call the same `core` services.
-- **`worker`** — plain Node process running BullMQ consumers. Its entrypoint reads `WORKER_QUEUES` (comma-separated, default: all) and registers only those consumers. Deploying the same image with `WORKER_QUEUES=achievements` yields a dedicated achievements service with zero code changes. All consumers import the same `packages/core` services as `web`.
+- **`worker`** — plain Node process consuming RabbitMQ queues via amqplib. Its entrypoint reads `WORKER_QUEUES` (comma-separated, default: all) and subscribes only to those queues. Deploying the same image with `WORKER_QUEUES=achievements` yields a dedicated achievements service with zero code changes. The worker also hosts the outbox relay (safe to run in every instance — rows are claimed with `FOR UPDATE SKIP LOCKED`) and a small cron scheduler that publishes time-based messages (export expiry, deletion-grace processing), since RabbitMQ has no native scheduling. All consumers import the same `packages/core` services as `web`.
 - **`migrator`** — one-shot container (same base image) that runs Drizzle migrations; executed as a pre-deploy step in Coolify. The database schema is owned exclusively by `packages/db` migrations; all processes deploy from the same version, so no schema drift is possible between "services."
 
 ### 2.2 Layering
@@ -74,16 +80,16 @@ Rules: no business logic in React components or tRPC procedures; no Drizzle impo
 Every domain side effect (achievement checks, feed entries, notifications, stat updates, cache invalidation) flows through one mechanism:
 
 1. A service commits its state change **and** an `outbox_events` row in the same transaction.
-2. A relay (small loop in the worker) polls undispatched outbox rows and publishes them to BullMQ queues, marking them dispatched.
-3. Consumers process events idempotently (dedup on event id) with exponential-backoff retries; poison messages land in dead-letter queues.
+2. A relay (small loop in the worker, concurrency-safe via `FOR UPDATE SKIP LOCKED`) polls undispatched outbox rows and publishes them to the durable topic exchange `surffit.events`, routing key = event type, waiting for publisher confirms before marking rows dispatched (at-least-once delivery).
+3. Each consumer group (achievements, feed, notifications, emails, stats, exports) owns a durable queue bound to the exchange with the routing patterns it cares about. Consumers process events idempotently (dedup on event id); failures route through a per-queue dead-letter exchange into TTL-based retry queues (10s → 1m → 10m); messages that exhaust retries are parked in a `.dead` queue for admin inspection.
 
 Event payloads are versioned Zod schemas defined in `core/events`. This is what makes the queue-selectable worker model safe: consumers never call each other, they only react to events.
 
-Example flow — user completes a workout: `workouts.service` commits the session + `workout.completed` event → relay → BullMQ → consumers: `gamification` (evaluate achievements, grant XP → may emit `achievement.unlocked`), `feed` (create activity), `analytics` (update user stats), `notifications` (notify friends per preferences).
+Example flow — user completes a workout: `workouts.service` commits the session + `workout.completed` event → relay → RabbitMQ (`surffit.events`, routing key `workout.completed`) → consumers: `gamification` (evaluate achievements, grant XP → may emit `achievement.unlocked`), `feed` (create activity), `analytics` (update user stats), `notifications` (notify friends per preferences).
 
 ### 2.4 Realtime
 
-In-app notifications and feed freshness use **SSE** from `web`, driven by Redis pub/sub (worker publishes, web forwards to connected clients). Clients fall back to polling. WebSockets are deliberately deferred until a feature needs bidirectional traffic.
+In-app notifications and feed freshness use **SSE** from `web`, driven by a RabbitMQ fanout exchange `surffit.realtime`: workers publish user-scoped realtime messages, and each `web` instance binds an exclusive auto-delete queue and forwards messages to its connected SSE clients. Clients fall back to polling. WebSockets are deliberately deferred until a feature needs bidirectional traffic.
 
 ### 2.5 Offline workout session
 
@@ -102,7 +108,7 @@ In-app notifications and feed freshness use **SSE** from `web`, driven by Redis 
 surffit/
   apps/
     web/                    # Next.js — UI, tRPC host, Auth.js, SSE
-    worker/                 # BullMQ consumers, queue-selectable entrypoint
+    worker/                 # RabbitMQ consumers + outbox relay, queue-selectable entrypoint
     docs/                   # Fumadocs documentation site
   packages/
     core/                   # ALL domain logic (see modules below)
@@ -116,6 +122,7 @@ surffit/
   tooling/                  # repo scripts, seed/codegen, CI helpers
   docker/                   # Dockerfiles, compose files, monitoring profile
   docs/                     # architecture docs, ADRs, superpowers specs
+  CLAUDE.md                 # agent onboarding: how AI coding agents work in this repo
 ```
 
 ### 3.1 `packages/core` modules
@@ -124,7 +131,7 @@ Each module: `service.ts` / `repository.ts` / `events.ts` / `policies.ts` / `ind
 
 Domain modules: `identity`, `exercises`, `gyms`, `plans`, `workouts`, `progression`, `body-tracking`, `social`, `feed`, `notifications`, `gamification`, `moderation`, `analytics`.
 
-Infrastructure ports (interface + env-selected implementation): `storage` (S3-compatible / local), `email` (console / SMTP / Resend), `search` (Postgres FTS / Meilisearch), `jobs` (BullMQ), `flags` (feature flags), `events` (outbox + event schemas), `errors` (typed domain errors), `logger` (Pino).
+Infrastructure ports (interface + env-selected implementation): `storage` (S3-compatible / local), `email` (console / SMTP / Resend), `search` (Postgres FTS / Meilisearch), `messaging` (RabbitMQ: topology assertion, publish with confirms, consumer runtime), `flags` (feature flags), `events` (outbox + event schemas), `errors` (typed domain errors), `logger` (Pino).
 
 **Import rules (lint-enforced):** modules import other modules only via their `index.ts`; `apps/*` import only `core` public APIs, `ui`, `trpc`, `auth`, `validation`, `i18n`; nothing imports `db` except `core` repositories and the migrator.
 
@@ -132,7 +139,19 @@ Infrastructure ports (interface + env-selected implementation): `storage` (S3-co
 
 ### 3.2 `packages/ui`
 
-shadcn/ui + Radix as the foundation (components vendored per shadcn convention), Tailwind CSS, Lucide icons, Framer Motion for animation, Recharts for charts. Domain components built on top: `WorkoutCard`, `ExerciseCard`, `ProgressChart`, `MuscleGroupCard`, `AchievementCard`, `GymCard`, `UserProfileCard`, `RestTimer`, `SetInputRow`, `CalendarHeatmap`. Dark mode first; both themes required for every component.
+shadcn/ui + Radix as the foundation (components vendored per shadcn convention), Tailwind CSS, Lucide icons, Framer Motion for animation, Recharts for charts.
+
+**shadcn CLI rule (binding for humans and AI agents):** base components are always added via the shadcn CLI — `pnpm dlx shadcn@latest add <component>` — never written by hand, guessed from memory, or copied from documentation snippets. Customization happens through the theme (CSS variables/Tailwind tokens) and by composing domain components on top; a hand-authored file posing as a shadcn primitive is a review blocker. Domain components built on top: `WorkoutCard`, `ExerciseCard`, `ProgressChart`, `MuscleGroupCard`, `AchievementCard`, `GymCard`, `UserProfileCard`, `RestTimer`, `SetInputRow`, `CalendarHeatmap`. Dark mode first; both themes required for every component.
+
+### 3.3 Agent onboarding — root `CLAUDE.md`
+
+The repository root carries a `CLAUDE.md` written for AI coding agents (and useful to humans), created in Phase 1 and updated whenever conventions change. Required content:
+
+- Commands: dev stack up (`docker compose -f docker/docker-compose.dev.yml up`), `pnpm dev`, `pnpm test`, `pnpm lint`, `pnpm db:migrate`, `pnpm db:seed` — pnpm only, never npm/yarn.
+- The layering rules (§2.2) and import rules (§3.1) in checklist form: business logic only in `core` services, SQL only in repositories, cross-domain effects only via events.
+- The shadcn CLI rule (§3.2): add base components via `pnpm dlx shadcn@latest add`, never hand-write them.
+- Where things live: which `core` module owns which feature, how to add a tRPC procedure, how to add a migration, how to define a new event (versioned Zod schema + consumer queue binding).
+- Conventions: kg-canonical units, translation tables with EN fallback, UUIDv7 client-generated ids for workout entities, soft-delete semantics, Conventional Commits.
 
 ---
 
@@ -260,9 +279,9 @@ No GitHub PR statistics anywhere, per product requirements.
 
 | # | Decision | Rationale |
 | --- | --- | --- |
-| 1 | Coolify/Docker as the design center; no serverless | User's deployment target. Long-running processes make BullMQ, SSE, and the outbox relay straightforward; self-hosting stays honest |
+| 1 | Coolify/Docker as the design center; no serverless | User's deployment target. Long-running processes make RabbitMQ consumers, SSE, and the outbox relay straightforward; self-hosting stays honest |
 | 2 | Modular core over maximal package split | 18 upfront packages = ceremony tax and cross-package churn while the domain is still moving. Lint-enforced module boundaries + a documented promotion rule preserve the same discipline at lower cost |
-| 3 | Transactional outbox + BullMQ for all side effects | Guarantees no lost side effects on crash; decouples domains; enables the queue-selectable worker scaling model |
+| 3 | Transactional outbox + RabbitMQ for all side effects | Guarantees no lost side effects on crash (outbox row commits with the state change; relay publishes with confirms = at-least-once); decouples domains; enables the queue-selectable worker scaling model |
 | 4 | Queue-selectable worker image | Microservice-style independent scaling ("deploy achievements separately") without shared-DB microservice drift — one schema owner, one image version |
 | 5 | tRPC internal; public REST API later as a separate versioned layer | End-to-end types now; public contract stability later without freezing internal APIs |
 | 6 | Auth.js v5, OAuth-only, Discord first, provider registry | Per requirements; registry makes adding Google/Apple/GitHub a config change |
@@ -276,7 +295,7 @@ No GitHub PR statistics anywhere, per product requirements.
 | 14 | Fan-out-on-read feed + Redis cache | Right for launch scale; outbox makes fan-out-on-write a later consumer change, not a rewrite |
 | 15 | Offline scope = active workout session only | User constraint; keeps the sync surface to idempotent upserts, avoiding a general sync engine |
 | 16 | Zustand + IndexedDB for live session; TanStack Query for server state | Smallest state footprint that satisfies offline durability |
-| 17 | pnpm + Turborepo | Standard, fast, well-understood monorepo toolchain |
+| 17 | pnpm + Turborepo, pnpm enforced | Standard, fast, well-understood monorepo toolchain. pnpm is the only permitted package manager: `packageManager` field, a preinstall `only-allow pnpm` guard, and CI installs with `--frozen-lockfile` so npm/yarn artifacts can't creep in |
 | 18 | Biome (lint + format) | One fast tool instead of ESLint+Prettier config sprawl; per prompt's "Biome or ESLint" |
 | 19 | Postgres FTS at launch, Meilisearch behind `SearchProvider` | No extra infra until search quality demands it |
 | 20 | Recharts | Per requirements; wrapped in `ui` chart components so a swap stays contained |
@@ -286,6 +305,9 @@ No GitHub PR statistics anywhere, per product requirements.
 | 24 | Progression engine as `ProgressionStrategy` interface, deterministic double-progression rule first | Useful now; clean seam for future AI assistance |
 | 25 | Health integrations as `HealthProvider` interface only, no adapters at launch | Per requirements: abstractions now, integrations later |
 | 26 | Fumadocs for `apps/docs` | Modern Next.js-native docs; consistent stack |
+| 27 | RabbitMQ over Redis-backed queues (revises the original BullMQ choice) | Real broker semantics: durable topic exchanges give the queue-selectable consumer-group model natively (bind patterns instead of code-level routing); publisher confirms + acks + DLX retry chains are first-class; management UI aids self-hosters; scales to genuinely separate services later. Redis stays for what it's best at: caching and rate limiting |
+| 28 | shadcn components only via the shadcn CLI | Generated components match the installed shadcn/Tailwind/Radix versions exactly; hand-written or from-memory components drift from upstream, break theming, and are unreviewable against a known baseline |
+| 29 | Root `CLAUDE.md` for AI coding agents | AI agents are expected contributors. One canonical, in-repo statement of commands, layering/import rules, and conventions (§3.3) keeps agent contributions consistent with the architecture; updated in the same PR as any convention change |
 
 ---
 
@@ -294,13 +316,13 @@ No GitHub PR statistics anywhere, per product requirements.
 - `core/errors` defines typed domain errors: `NotFoundError`, `PermissionDeniedError`, `ConflictError`, `RateLimitedError`, `DomainRuleViolationError`, each carrying an i18n message key + params.
 - Services throw domain errors; the tRPC error formatter maps them to tRPC codes once; clients render localized messages from keys. Unexpected errors are logged with request context and surface as a generic localized failure.
 - Zod at every boundary: tRPC inputs, environment config (validated at boot, fail-fast), outbox event payloads (versioned schemas).
-- Worker consumers: idempotent (event-id dedup), exponential-backoff retries, dead-letter queues (admin-visible in Phase 8).
+- Worker consumers: idempotent (event-id dedup); failures nack into per-queue TTL retry queues via dead-letter exchanges (10s → 1m → 10m); exhausted messages park in `.dead` queues (admin-visible in Phase 8).
 - Client: route-segment error boundaries; offline mutation queue retries with backoff; non-workout mutations disabled while offline.
 
 ## 7. Testing Strategy
 
 - **Vitest** everywhere. `core` services unit-tested against in-memory repository fakes (repository interfaces make this cheap).
-- Repositories + migrations integration-tested against real Postgres via **Testcontainers**.
+- Repositories + migrations integration-tested against real Postgres via **Testcontainers**; the messaging port (outbox relay, publish/consume, retry chain) integration-tested against a Testcontainers RabbitMQ.
 - tRPC procedures tested through `createCaller` with fabricated sessions — this is where ABAC policies are verified.
 - `ui` components: React Testing Library where behavior warrants (timers, set input, offline gating).
 - **Playwright** configured from Phase 1; first reserved journeys: (a) OAuth signup → username claim, (b) full live-workout session including an offline gap.
@@ -318,7 +340,7 @@ No GitHub PR statistics anywhere, per product requirements.
 ## 9. Infrastructure & Deployment
 
 - **Images:** `web` (Next standalone), `worker`, `migrator` — built by GitHub Actions, published to GHCR, deployed by Coolify.
-- **docker-compose.dev.yml:** Postgres, Redis, MinIO, Mailpit (dev SMTP sink for the email provider). App processes run via `pnpm dev` locally.
+- **docker-compose.dev.yml:** Postgres, RabbitMQ (management plugin enabled — UI on :15672), Redis, MinIO, Mailpit (dev SMTP sink for the email provider). App processes run via `pnpm dev` locally.
 - **docker-compose.prod.yml:** reference self-hosting stack mirroring the Coolify layout; optional `monitoring` profile with Prometheus + Grafana (provisioned dashboards).
 - Config via environment variables only, validated at boot; `.env.example` is the canonical reference.
 - Health endpoints (`/healthz`, `/readyz`) on web and worker for Coolify health checks.
@@ -329,7 +351,7 @@ Each phase ends deployable and gets its own spec → plan → implementation cyc
 
 | Phase | Scope | Key deliverables |
 | --- | --- | --- |
-| 1. Foundation | Repo, tooling, infra, auth | Turborepo + pnpm + Biome + CI; Docker images + compose; `db` with initial identity schema + migrator; Auth.js + Discord + username onboarding; outbox + BullMQ skeleton; logger; health endpoints |
+| 1. Foundation | Repo, tooling, infra, auth | Turborepo + pnpm + Biome + CI; Docker images + compose; `db` with initial identity schema + migrator; Auth.js + Discord + username onboarding; outbox + RabbitMQ skeleton (topology assertion, relay, DLX retry chain); logger; health endpoints; root `CLAUDE.md` (§3.3) |
 | 2. User system | Identity domain | Profiles, preferences, privacy settings, ABAC engine + policies, avatar upload (storage provider), GDPR consent + export/deletion jobs |
 | 3. Fitness content | Exercises, gyms | Movements/exercises/muscles/equipment schema + EN/DE seed data; gyms + equipment; community submissions with **minimal moderation** (reports, approval queue); Postgres FTS |
 | 4. Training system | Plans + live workouts | Plan builder, immutable versions, forking; live workout mode (offline session, timers, previous-performance display); progression suggestions v1; personal records |
