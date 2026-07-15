@@ -17,24 +17,3 @@ export async function runMigrations(connectionString: string): Promise<void> {
     await pool.end();
   }
 }
-
-async function main() {
-  const connectionString = process.env.DATABASE_URL;
-
-  if (!connectionString) {
-    console.error("DATABASE_URL is not set");
-    process.exit(1);
-  }
-
-  await runMigrations(connectionString);
-  console.log("Migrations applied successfully");
-}
-
-const isMain = process.argv[1] === fileURLToPath(import.meta.url);
-
-if (isMain) {
-  main().catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
-}
