@@ -336,6 +336,8 @@ Every task implicitly includes these, in addition to all Phase 1 Global Constrai
 
 ## Execution Notes for the Implementer
 
+- Do not dispatch a final whole-branch code-review subagent after the last task unless the
+  user explicitly asks for one — they run their own review once the project is done.
 - Task order is dependency order; do not reorder. Tasks 3/4 (ABAC + default-deny) and 9/10 (GDPR pipeline) are the architectural heart — reread spec §5 #7/#23 and §2.3 before improvising there.
 - The Phase 1 plan's Execution Notes still apply (Docker required for integration tests; prefer current official tool flows over memorized flags; never touch `components/ui` by hand; never npm/yarn; never `console.log`).
 - `identityService.claimUsername` changes shape in Task 6 — the onboarding form and its tests move in the same task; nothing else calls it.

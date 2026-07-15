@@ -21,6 +21,10 @@ When implementing a plan under `docs/superpowers/plans/`, use `superpowers:execu
 not `superpowers:subagent-driven-development`, regardless of what the plan file's own header
 suggests.
 
+Do not run a final code review (e.g. dispatching a code-reviewer subagent) at the end of a
+plan or task unless the user explicitly asks for one — they run their own review once the
+project is done.
+
 ## Architecture rules
 
 - Business logic lives only in `@surffit/core` services.
