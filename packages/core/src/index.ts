@@ -22,3 +22,4 @@ export * from "./gdpr";
 export * from "./locale";
 export * from "./exercises";
 export * from "./gyms";
+export * from "./moderation";
