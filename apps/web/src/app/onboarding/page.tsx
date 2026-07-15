@@ -1,3 +1,4 @@
+import { route, routes } from "@/lib/routes";
 import { auth } from "@surffit/auth";
 import { redirect } from "next/navigation";
 import { UsernameForm } from "./username-form";
@@ -6,11 +7,11 @@ export default async function OnboardingPage() {
   const session = await auth();
 
   if (!session?.user) {
-    redirect("/signin");
+    redirect(route(routes.signin, {}));
   }
 
   if (session.user.onboarded) {
-    redirect("/");
+    redirect(route(routes.home, {}));
   }
 
   return (

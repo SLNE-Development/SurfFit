@@ -1,5 +1,6 @@
 "use client";
 
+import { route, routes } from "@/lib/routes";
 import { trpc } from "@/lib/trpc/client";
 import { Button } from "@surffit/ui/components/ui/button";
 import {
@@ -22,7 +23,7 @@ export function UsernameForm() {
 
   const claimUsername = trpc.identity.claimUsername.useMutation({
     onSuccess: () => {
-      router.push("/");
+      router.push(route(routes.home, {}));
     },
     onError: (error) => {
       const data = error.data as { i18nKey?: string } | null;

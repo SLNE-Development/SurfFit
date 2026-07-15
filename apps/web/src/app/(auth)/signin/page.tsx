@@ -1,3 +1,4 @@
+import { route, routes } from "@/lib/routes";
 import { signIn } from "@surffit/auth";
 import { Button } from "@surffit/ui/components/ui/button";
 
@@ -8,7 +9,7 @@ export default function SignInPage() {
       <form
         action={async () => {
           "use server";
-          await signIn("discord", { redirectTo: "/" });
+          await signIn("discord", { redirectTo: route(routes.home, {}) });
         }}
       >
         <Button type="submit">Continue with Discord</Button>
