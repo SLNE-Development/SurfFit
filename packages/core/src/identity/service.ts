@@ -1,7 +1,53 @@
-import { usernameSchema } from "@surffit/validation";
-import { ConflictError, DomainRuleViolationError } from "../errors";
+import {
+  preferencesUpdateSchema,
+  privacyUpdateSchema,
+  profileUpdateSchema,
+  usernameSchema,
+} from "@surffit/validation";
+import type { Role } from "../authz/engine";
+import { assertCan, can } from "../authz/engine";
+import { ConflictError, DomainRuleViolationError, NotFoundError } from "../errors";
 import type { EventEnvelope } from "../events/envelope";
 import { userRegisteredEvent } from "../events/user-registered";
+import { manageOwnAccountPolicy, viewProfilePolicy } from "./policies";
+
+export type ProfileVisibility = "public" | "following" | "private";
+export type UnitSystem = "metric" | "imperial";
+export type Theme = "dark" | "light" | "system";
+
+export type ProfileRecord = {
+  id: string;
+  username: string | null;
+  displayName: string | null;
+  biography: string | null;
+  avatarKey: string | null;
+  createdAt: Date;
+  visibility: ProfileVisibility;
+};
+
+export type UserRecord = {
+  id: string;
+  username: string | null;
+  displayName: string | null;
+  biography: string | null;
+  avatarKey: string | null;
+  email: string;
+};
+
+export type PreferencesRecord = {
+  unitSystem: UnitSystem;
+  theme: Theme;
+  firstWeekday: number;
+  defaultRestSeconds: number;
+};
+
+export type PrivacySettingsRecord = {
+  profileVisibility: ProfileVisibility;
+  showStatistics: boolean;
+  showAchievements: boolean;
+  showWorkouts: boolean;
+  showBodyMetrics: boolean;
+};
 
 export type IdentityRepository = {
   withTransaction: <T>(fn: (tx: unknown) => Promise<T>) => Promise<T>;
@@ -15,6 +61,24 @@ export type IdentityRepository = {
   ) => Promise<{ onboardedAt: Date | null } | null>;
   setUsername: (userId: string, username: string, tx?: unknown) => Promise<"ok" | "taken">;
   isUsernameTaken: (username: string) => Promise<boolean>;
+  findProfileByUsername: (username: string) => Promise<ProfileRecord | null>;
+  findUserById: (userId: string) => Promise<UserRecord | null>;
+  getUserRoles: (userId: string) => Promise<Role[]>;
+  getPreferences: (userId: string) => Promise<PreferencesRecord | null>;
+  updatePreferences: (
+    userId: string,
+    partial: Partial<PreferencesRecord>,
+  ) => Promise<PreferencesRecord>;
+  getPrivacySettings: (userId: string) => Promise<PrivacySettingsRecord | null>;
+  updatePrivacySettings: (
+    userId: string,
+    partial: Partial<PrivacySettingsRecord>,
+  ) => Promise<PrivacySettingsRecord>;
+  updateProfileFields: (
+    userId: string,
+    fields: { displayName: string | null; biography: string | null },
+  ) => Promise<UserRecord>;
+  setAvatarKey: (userId: string, key: string | null) => Promise<{ previousKey: string | null }>;
 };
 
 export function createIdentityService(repo: IdentityRepository) {
@@ -61,6 +125,112 @@ export function createIdentityService(repo: IdentityRepository) {
       const result = usernameSchema.safeParse(rawUsername);
       if (!result.success) return false;
       return !(await repo.isUsernameTaken(result.data));
+    },
+
+    async getProfileByUsername(viewer: { id: string } | null, username: string) {
+      const profile = await repo.findProfileByUsername(username);
+      if (!profile) {
+        throw new NotFoundError("identity.profile.notFound");
+      }
+
+      const actor = viewer ? { id: viewer.id, roles: await repo.getUserRoles(viewer.id) } : null;
+
+      // Phase 6 wiring point: `following` visibility always resolves to
+      // false until the follows/user_blocks feature lands.
+      const allowed = can(
+        viewProfilePolicy,
+        actor,
+        { ownerId: profile.id, visibility: profile.visibility },
+        { ownerFollowsViewer: false },
+      );
+
+      if (!allowed) {
+        throw new NotFoundError("identity.profile.notFound");
+      }
+
+      return {
+        id: profile.id,
+        username: profile.username,
+        displayName: profile.displayName,
+        biography: profile.biography,
+        avatarKey: profile.avatarKey,
+        createdAt: profile.createdAt,
+        isOwner: viewer?.id === profile.id,
+      };
+    },
+
+    async getOwnProfile(userId: string) {
+      const user = await repo.findUserById(userId);
+      if (!user) {
+        throw new NotFoundError("identity.profile.notFound");
+      }
+      return user;
+    },
+
+    async updateProfile(
+      userId: string,
+      input: { displayName: string | null; biography: string | null },
+    ) {
+      const result = profileUpdateSchema.safeParse(input);
+      if (!result.success) {
+        throw new DomainRuleViolationError(
+          result.error.issues[0]?.message ?? "validation.profile.invalid",
+        );
+      }
+
+      assertCan(manageOwnAccountPolicy, { id: userId, roles: [] }, { ownerId: userId }, undefined);
+
+      return repo.updateProfileFields(userId, result.data);
+    },
+
+    async getPreferences(userId: string) {
+      const preferences = await repo.getPreferences(userId);
+      if (!preferences) {
+        throw new NotFoundError("identity.preferences.notFound");
+      }
+      return preferences;
+    },
+
+    async updatePreferences(userId: string, input: Partial<PreferencesRecord>) {
+      const result = preferencesUpdateSchema.safeParse(input);
+      if (!result.success) {
+        throw new DomainRuleViolationError(
+          result.error.issues[0]?.message ?? "validation.preferences.range",
+        );
+      }
+
+      assertCan(manageOwnAccountPolicy, { id: userId, roles: [] }, { ownerId: userId }, undefined);
+
+      return repo.updatePreferences(userId, result.data);
+    },
+
+    async getPrivacySettings(userId: string) {
+      const privacy = await repo.getPrivacySettings(userId);
+      if (!privacy) {
+        throw new NotFoundError("identity.privacy.notFound");
+      }
+      return privacy;
+    },
+
+    async updatePrivacySettings(userId: string, input: Partial<PrivacySettingsRecord>) {
+      const result = privacyUpdateSchema.safeParse(input);
+      if (!result.success) {
+        throw new DomainRuleViolationError(
+          result.error.issues[0]?.message ?? "validation.privacy.invalid",
+        );
+      }
+
+      assertCan(manageOwnAccountPolicy, { id: userId, roles: [] }, { ownerId: userId }, undefined);
+
+      return repo.updatePrivacySettings(userId, result.data);
+    },
+
+    async setAvatar(userId: string, key: string) {
+      return repo.setAvatarKey(userId, key);
+    },
+
+    async clearAvatar(userId: string) {
+      return repo.setAvatarKey(userId, null);
     },
   };
 }
