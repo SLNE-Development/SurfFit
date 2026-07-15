@@ -29,6 +29,13 @@
       "when": 1784110126188,
       "tag": "0003_tricky_microbe",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784110383315,
+      "tag": "0004_steady_vision",
+      "breakpoints": true
     }
   ]
 }

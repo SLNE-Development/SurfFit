@@ -6,3 +6,4 @@ export * from "./consents";
 export * from "./outbox";
 export * from "./gdpr";
 export * from "./exercises";
+export * from "./gyms";

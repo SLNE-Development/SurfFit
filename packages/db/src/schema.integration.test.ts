@@ -12,10 +12,13 @@ import {
   exerciseMuscles,
   exerciseTranslations,
   exercises,
+  gymMembers,
+  gyms,
   movementTranslations,
   movements,
   muscleGroups,
   outboxEvents,
+  userPreferences,
   users,
 } from "./schema";
 
@@ -305,6 +308,76 @@ describe("exercise content schema", () => {
 
     await expect(
       db.insert(exerciseMuscles).values({ exerciseId, muscleGroupId, role: "secondary" }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("gyms schema", () => {
+  it("creates the gyms/gym_equipment/gym_members tables", async () => {
+    const result = await db.execute<{ table_name: string }>(
+      `select table_name from information_schema.tables where table_schema = 'public'`,
+    );
+    const tableNames = result.rows.map((row) => row.table_name);
+
+    expect(tableNames).toEqual(expect.arrayContaining(["gyms", "gym_equipment", "gym_members"]));
+  });
+
+  it("inserts a gym defaulting to pending status with a matching search vector", async () => {
+    const ownerId = newId();
+    await db
+      .insert(users)
+      .values({ id: ownerId, displayName: "Owner", email: `${ownerId}@example.com` });
+
+    const gymId = newId();
+    await db.insert(gyms).values({
+      id: gymId,
+      name: "Iron Paradise",
+      city: "Berlin",
+      countryCode: "DE",
+      ownerUserId: ownerId,
+    });
+
+    const [row] = await db.select().from(gyms).where(eq(gyms.id, gymId));
+    expect(row?.status).toBe("pending");
+
+    const matchResult = await db.execute<{ count: string }>(
+      `select count(*)::text as count from gyms where id = '${gymId}' and search @@ websearch_to_tsquery('simple', 'Berlin')`,
+    );
+    expect(matchResult.rows[0]?.count).toBe("1");
+  });
+
+  it("rejects a duplicate (gymId, userId) membership", async () => {
+    const ownerId = newId();
+    await db
+      .insert(users)
+      .values({ id: ownerId, displayName: "Owner2", email: `${ownerId}@example.com` });
+    const memberId = newId();
+    await db
+      .insert(users)
+      .values({ id: memberId, displayName: "Member", email: `${memberId}@example.com` });
+
+    const gymId = newId();
+    await db.insert(gyms).values({
+      id: gymId,
+      name: "Gym Two",
+      city: "Hamburg",
+      countryCode: "DE",
+      ownerUserId: ownerId,
+    });
+
+    await db.insert(gymMembers).values({ gymId, userId: memberId });
+
+    await expect(db.insert(gymMembers).values({ gymId, userId: memberId })).rejects.toThrow();
+  });
+
+  it("enforces the default_gym_id FK on user_preferences", async () => {
+    const userId = newId();
+    await db
+      .insert(users)
+      .values({ id: userId, displayName: "Prefs User", email: `${userId}@example.com` });
+
+    await expect(
+      db.insert(userPreferences).values({ userId, defaultGymId: newId() }),
     ).rejects.toThrow();
   });
 });
