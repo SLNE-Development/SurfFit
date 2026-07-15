@@ -1,12 +1,11 @@
 import amqplib, { type ChannelModel } from "amqplib";
 import { createLogger } from "../logger";
 
-const logger = createLogger("messaging");
-
 export async function connect(
   url: string,
   opts: { retryDelayMs?: number; maxRetries?: number } = {},
 ): Promise<ChannelModel> {
+  const logger = createLogger("messaging");
   const retryDelayMs = opts.retryDelayMs ?? 1000;
   const maxRetries = opts.maxRetries ?? Number.POSITIVE_INFINITY;
 
