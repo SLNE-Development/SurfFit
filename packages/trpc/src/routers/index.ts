@@ -4,6 +4,7 @@ import { gdprRouter } from "./gdpr";
 import { gymsRouter } from "./gyms";
 import { healthRouter } from "./health";
 import { identityRouter } from "./identity";
+import { moderationRouter } from "./moderation";
 import { profileRouter } from "./profile";
 import { settingsRouter } from "./settings";
 
@@ -15,6 +16,7 @@ export const appRouter = router({
   gdpr: gdprRouter,
   exercises: exercisesRouter,
   gyms: gymsRouter,
+  moderation: moderationRouter,
 });
 
 export type AppRouter = typeof appRouter;

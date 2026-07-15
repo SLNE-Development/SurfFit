@@ -89,6 +89,57 @@ describe("gyms router", () => {
   });
 });
 
+describe("moderation router", () => {
+  it("rejects every moderation procedure anonymously with UNAUTHORIZED", async () => {
+    const caller = appRouter.createCaller(makeContext(null));
+
+    await expect(caller.moderation.queue()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(
+      caller.moderation.review({
+        subjectType: "movement",
+        subjectId: "m1",
+        decision: "approve",
+      }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(
+      caller.moderation.report({ subjectType: "movement", subjectId: "m1", reason: "spam" }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+    await expect(caller.moderation.reports({ status: "open" })).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+    });
+    await expect(
+      caller.moderation.resolveReport({ reportId: "r1", resolution: "resolved" }),
+    ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  });
+
+  it("rejects moderation.review decision 'delete' with BAD_REQUEST", async () => {
+    const caller = appRouter.createCaller(makeContext({ user: { id: "user-1" } }));
+    await expect(
+      caller.moderation.review({
+        subjectType: "movement",
+        subjectId: "m1",
+        decision: "delete" as never,
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("marks all five moderation procedures with session authz meta", () => {
+    const procedures = appRouter._def.procedures as unknown as Record<
+      string,
+      { _def: { meta?: { authz?: string } } }
+    >;
+    for (const path of [
+      "moderation.queue",
+      "moderation.review",
+      "moderation.report",
+      "moderation.reports",
+      "moderation.resolveReport",
+    ]) {
+      expect(procedures[path]?._def.meta?.authz).toBe("session");
+    }
+  });
+});
+
 describe("gdpr router", () => {
   it("rejects every gdpr procedure anonymously with UNAUTHORIZED", async () => {
     const caller = appRouter.createCaller(makeContext(null));
