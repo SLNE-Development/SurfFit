@@ -2,7 +2,7 @@ import { ConflictError } from "@surffit/core";
 import { describe, expect, it } from "vitest";
 import type { Context } from "./context";
 import { appRouter } from "./routers";
-import { protectedProcedure, publicProcedure, router } from "./trpc";
+import { guardedProcedure, protectedProcedure, publicProcedure, router } from "./trpc";
 
 const fakeLogger = {
   info: () => {},
@@ -22,6 +22,7 @@ const testRouter = router({
   throwConflict: publicProcedure.query(() => {
     throw new ConflictError("x.y");
   }),
+  unannotated: guardedProcedure.query(() => ({ ok: true })),
 });
 
 describe("trpc router", () => {
@@ -48,5 +49,10 @@ describe("trpc router", () => {
     await expect(caller.identity.claimUsername({ username: "surffan" })).rejects.toMatchObject({
       code: "UNAUTHORIZED",
     });
+  });
+
+  it("rejects a procedure with no authz meta with FORBIDDEN", async () => {
+    const caller = testRouter.createCaller(makeContext());
+    await expect(caller.unannotated()).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });
