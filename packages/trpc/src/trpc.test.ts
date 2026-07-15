@@ -42,4 +42,11 @@ describe("trpc router", () => {
       data: { i18nKey: "x.y" },
     });
   });
+
+  it("rejects an anonymous identity.claimUsername call with UNAUTHORIZED", async () => {
+    const caller = appRouter.createCaller(makeContext(null));
+    await expect(caller.identity.claimUsername({ username: "surffan" })).rejects.toMatchObject({
+      code: "UNAUTHORIZED",
+    });
+  });
 });
