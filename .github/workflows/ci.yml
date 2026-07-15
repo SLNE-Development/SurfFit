@@ -46,25 +46,44 @@ jobs:
   docker:
     needs: quality
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
 
+      - uses: docker/login-action@v3
+        if: github.event_name == 'push'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/web.Dockerfile
-          push: false
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ghcr.io/slne-development/surffit-web:latest
+            ghcr.io/slne-development/surffit-web:${{ github.sha }}
 
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/worker.Dockerfile
-          push: false
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ghcr.io/slne-development/surffit-worker:latest
+            ghcr.io/slne-development/surffit-worker:${{ github.sha }}
 
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/migrator.Dockerfile
-          push: false
+          push: ${{ github.event_name == 'push' }}
+          tags: |
+            ghcr.io/slne-development/surffit-migrator:latest
+            ghcr.io/slne-development/surffit-migrator:${{ github.sha }}
