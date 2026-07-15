@@ -1,3 +1,4 @@
+import { SiteHeader } from "@/components/site-header";
 import { TRPCProvider } from "@/lib/trpc/client";
 import { Toaster } from "@surffit/ui/components/ui/sonner";
 import { TooltipProvider } from "@surffit/ui/components/ui/tooltip";
@@ -32,8 +33,11 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <TRPCProvider>
-          <TooltipProvider>{children}</TooltipProvider>
-          <Toaster />
+          <TooltipProvider>
+            <SiteHeader />
+            {children}
+          </TooltipProvider>
+          <Toaster richColors />
         </TRPCProvider>
       </body>
     </html>

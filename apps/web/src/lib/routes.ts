@@ -1,5 +1,5 @@
 import type { Route } from "next";
-import { createRoutes, renderPath } from "typesafe-routes";
+import { createRoutes, renderPath, str } from "typesafe-routes";
 
 export const routes = createRoutes({
   home: { path: [] },
@@ -7,6 +7,16 @@ export const routes = createRoutes({
   onboarding: { path: ["onboarding"] },
   terms: { path: ["terms"] },
   privacy: { path: ["privacy"] },
+  profile: { path: ["u", str("username")] },
+  settings: {
+    path: ["settings"],
+    children: {
+      profile: { path: ["profile"] },
+      preferences: { path: ["preferences"] },
+      privacy: { path: ["privacy"] },
+      account: { path: ["account"] },
+    },
+  },
 });
 
 export function route<T extends Parameters<typeof renderPath>[0]>(

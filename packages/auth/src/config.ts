@@ -35,6 +35,7 @@ export const authConfig: NextAuthConfig = {
       const dbUser = user as typeof user & {
         username: string | null;
         onboardedAt: Date | null;
+        avatarKey: string | null;
       };
 
       return {
@@ -44,6 +45,7 @@ export const authConfig: NextAuthConfig = {
           username: dbUser.username,
           displayName: dbUser.name,
           onboarded: dbUser.onboardedAt !== null,
+          avatarKey: dbUser.avatarKey,
         },
       };
     },

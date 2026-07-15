@@ -7,6 +7,7 @@ declare module "next-auth" {
       username: string | null;
       displayName: string | null;
       onboarded: boolean;
+      avatarKey: string | null;
     } & DefaultSession["user"];
   }
 }
