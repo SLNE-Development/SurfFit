@@ -21,3 +21,4 @@ export * from "./authz";
 export * from "./gdpr";
 export * from "./locale";
 export * from "./exercises";
+export * from "./gyms";
