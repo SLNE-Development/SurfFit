@@ -57,7 +57,20 @@ Three deployable units, each its own Docker image:
 ```
 
 - **`web`** — Next.js App Router, `output: "standalone"`. Hosts the UI, the tRPC API (route handler), Auth.js, and the SSE endpoint for realtime updates. Server Components for read-heavy pages; all mutations via tRPC procedures. Server Actions are permitted only as thin wrappers that call the same `core` services.
-- **`worker`** — plain Node process consuming RabbitMQ queues via amqplib. Its entrypoint reads `WORKER_QUEUES` (comma-separated, default: all) and subscribes only to those queues. Deploying the same image with `WORKER_QUEUES=achievements` yields a dedicated achievements service with zero code changes. The worker also hosts the outbox relay (safe to run in every instance — rows are claimed with `FOR UPDATE SKIP LOCKED`) and a small cron scheduler that publishes time-based messages (export expiry, deletion-grace processing), since RabbitMQ has no native scheduling. All consumers import the same `packages/core` services as `web`.
+- **`worker`** — plain Node process consuming RabbitMQ queues via amqplib. Its entrypoint reads `WORKER_QUEUES` (comma-separated, default: all) and subscribes only to those queues. The worker also hosts the outbox relay (safe to run in every instance — rows are claimed with `FOR UPDATE SKIP LOCKED`) and a small cron scheduler that publishes time-based messages (export expiry, deletion-grace processing), since RabbitMQ has no native scheduling. All consumers import the same `packages/core` services as `web`.
+
+**Every consumer group is a deployable microservice.** Each group (achievements, feed, notifications, emails, stats, exports) owns its own durable RabbitMQ queue, so each can run as an independently deployed, independently scaled service in Coolify — all from the same worker image, differing only in env config:
+
+| Coolify service | `WORKER_QUEUES` | Replicas (example) |
+| --- | --- | --- |
+| achievement-service | `achievements` | 3 |
+| mail-service | `emails` | 1 |
+| feed-service | `feed` | 2 |
+| notification-service | `notifications` | 2 |
+| worker (catch-all) | remaining queues | 1 |
+
+Replicas of one service are competing consumers on the same durable queue — RabbitMQ load-balances deliveries between them, so scaling a hot domain is just raising that service's replica count. Different services never contend with each other: each queue receives its own copy of the events it is bound to. All instances connect to the same Postgres (shared-database model); the single `migrator`-owned schema keeps them version-consistent. A small self-hosted instance runs one worker with `WORKER_QUEUES` unset (all queues); the hosted instance splits domains into named services as load demands — no code change either way.
+
 - **`migrator`** — one-shot container (same base image) that runs Drizzle migrations; executed as a pre-deploy step in Coolify. The database schema is owned exclusively by `packages/db` migrations; all processes deploy from the same version, so no schema drift is possible between "services."
 
 ### 2.2 Layering
@@ -283,7 +296,7 @@ No GitHub PR statistics anywhere, per product requirements.
 | 1 | Coolify/Docker as the design center; no serverless | User's deployment target. Long-running processes make RabbitMQ consumers, SSE, and the outbox relay straightforward; self-hosting stays honest |
 | 2 | Modular core over maximal package split | 18 upfront packages = ceremony tax and cross-package churn while the domain is still moving. Lint-enforced module boundaries + a documented promotion rule preserve the same discipline at lower cost |
 | 3 | Transactional outbox + RabbitMQ for all side effects | Guarantees no lost side effects on crash (outbox row commits with the state change; relay publishes with confirms = at-least-once); decouples domains; enables the queue-selectable worker scaling model |
-| 4 | Queue-selectable worker image | Microservice-style independent scaling ("deploy achievements separately") without shared-DB microservice drift — one schema owner, one image version |
+| 4 | Queue-selectable worker image — every consumer group is a deployable microservice | Achievement-service, mail-service, feed-service etc. are Coolify deployments of the same image with different `WORKER_QUEUES`; replicas scale per domain via competing consumers on the group's queue. Microservice scaling without shared-DB microservice drift — one schema owner, one image version |
 | 5 | tRPC internal; public REST API later as a separate versioned layer | End-to-end types now; public contract stability later without freezing internal APIs |
 | 6 | Auth.js v5, OAuth-only, Discord first, provider registry | Per requirements; registry makes adding Google/Apple/GitHub a config change |
 | 7 | ABAC as code (`can(actor, action, resource, context)`), roles as data | Policies need context (ownership, visibility, report status) that role checks can't express; code policies are testable |
