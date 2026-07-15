@@ -46,14 +46,18 @@ Never hand-write or edit files under `packages/ui/src/components/ui` except styl
 ## Where things live
 
 - `packages/core` — domain services (`identity`: profile, preferences, privacy, consents),
-  ABAC engine (`authz/` — `can`/`assertCan`; policies live per-module in `<module>/policies.ts`),
-  S3 storage port (`storage/`), GDPR export/deletion pipeline (`gdpr/`), event definitions
-  (`events/`), messaging port (`messaging/`), outbox writer/relay (`outbox/`), env loader,
-  logger, domain errors.
+  `exercises` (movement→variant catalog, community submissions, FTS reads), `gyms` (directory,
+  equipment, membership), `moderation` (reports + approval queue — the one module whose
+  repository owns other modules' status transitions, by design), ABAC engine (`authz/` —
+  `can`/`assertCan`; policies live per-module in `<module>/policies.ts`), S3 storage port
+  (`storage/`), GDPR export/deletion pipeline (`gdpr/`), event definitions (`events/`),
+  messaging port (`messaging/`), outbox writer/relay (`outbox/`), env loader, logger, domain
+  errors.
 - `packages/db` — Drizzle schema, client, migrator, seed script.
 - `packages/trpc` — router, context, error mapping.
 - `packages/auth` — NextAuth v5 config (Discord OAuth, database sessions).
-- `packages/validation` — shared Zod schemas (e.g. username, profile, settings).
+- `packages/validation` — shared Zod schemas (e.g. username, profile, settings, exercise, gym,
+  report).
 - `packages/ui` — shared shadcn component library (`@surffit/ui`).
 - `apps/web` — Next.js app; imports `@surffit/ui`, `@surffit/trpc`, `@surffit/auth`.
 - `apps/worker` — RabbitMQ consumer + outbox relay + cron sweep process.
@@ -69,6 +73,12 @@ review the generated SQL, then `pnpm db:migrate`.
 **Define a new event:** add a `defineEvent` call in `packages/core/src/events/`, register it
 in `events/registry.ts`, and bind a consumer group in `messaging/groups.ts`.
 
+**Add reviewable community content:** insert with status `pending` and emit `content.submitted`;
+only the moderation module flips status afterward.
+
+**Add translated content:** sibling `*_translations` table, canonical `en` row written in the
+same tx, reads take a `locale` with EN fallback in the repository query.
+
 **Reads vs. mutations:** Server Components call core services directly (via the web `db`/
 `storage` singletons). All mutations, and any client-side data fetching, go through tRPC.
 The one exception is `/api/avatar` — a binary multipart upload route that doesn't fit tRPC's
@@ -80,7 +90,10 @@ JSON transport.
 - Soft deletes via `deleted_at` where the schema calls for it.
 - Conventional Commits (`type(scope): summary`).
 - TypeScript strict, no `any` — use `unknown` + narrowing.
-- Translation tables with EN fallback and kg-canonical units arrive in a later phase.
+- Translation tables with EN fallback are live (exercises, equipment, muscle groups);
+  kg-canonical units arrive with workouts (Phase 4).
+- `pnpm db:seed` seeds the EN/DE exercise catalog and is idempotent.
+- FTS = generated `tsvector` (simple config) + GIN indexes, queried only in repository files.
 - S3-compatible storage (MinIO in dev) env vars are documented in `.env.example` — treat it
   as canonical. Storage objects are referenced by key in the DB; URLs are always freshly
   signed, never persisted.
